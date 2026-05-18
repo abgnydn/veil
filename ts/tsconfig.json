@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun-types"]
+  },
+  "include": [
+    "index.ts",
+    "interface.ts",
+    "classifier.ts",
+    "cohort.ts",
+    "webllm.ts",
+    "anthropic.ts",
+    "zerotvm.ts",
+    "openai-compat.ts",
+    "transformers-js.ts",
+    "router.ts",
+    "kvkk-profile.ts",
+    "kvkk-pdf.ts",
+    "kvkk-deletion.ts",
+    "kvkk-controller-config.ts",
+    "kvkk-sar.ts",
+    "kvkk-sar-pdf.ts",
+    "router.test.ts",
+    "anthropic.test.ts",
+    "zerotvm.test.ts",
+    "openai-compat.test.ts",
+    "transformers-js.test.ts",
+    "kvkk-profile.test.ts",
+    "kvkk-pdf.test.ts",
+    "kvkk-deletion.test.ts",
+    "kvkk-sar.test.ts",
+    "kvkk-sar-pdf.test.ts"
+  ]
+}

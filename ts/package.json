@@ -1,0 +1,17 @@
+{
+  "name": "@abgnydn/veil",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": { ".": "./index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "bun test" },
+  "dependencies": {
+    "jspdf": "^2.5.1"
+  },
+  "devDependencies": {
+    "bun-types": "^1.1.42",
+    "typescript": "^5.7.2"
+  }
+}
