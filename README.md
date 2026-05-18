@@ -28,7 +28,7 @@ Round-trip stability is load-bearing: send "remind alice@acme.com" → model see
 | | path | language | what it ships |
 |---|---|---|---|
 | **rust crate** | `rust/` | Rust 1.75+ | Regex pseudonymizer, `ProviderClient::Veil` wrapping variant, streamed `MessageStream` reverse-mapping. 3 commits across Phase 0 / 0.5a / 0.5b. |
-| **typescript adapters** | `ts/` | TS 5 + Bun | Backend interface + tier algebra, caution-biased classifier, k-anonymous cohort blender, adapters for Anthropic + OpenAI-compat (Ollama, LM Studio, llamafile, vLLM), KVKK Madde 11 (b / c / d / e / f) compliance suite — deletion, subject-access request, PDF export. |
+| **typescript adapters** | `ts/` | TS 5 + Bun | Backend interface + tier algebra, caution-biased classifier, k-anonymous cohort blender, adapters for Anthropic + OpenAI-compat (Ollama, LM Studio, llamafile, vLLM), WebLLM, transformers.js. |
 
 The two halves do not talk to each other yet. See "Status" below.
 
@@ -41,7 +41,7 @@ veil classifies content into four tiers and enforces them at adapter constructio
 | `public` | safe for any provider | "what's the capital of France" |
 | `caution` | mildly identifying | "my project uses React 18" |
 | `private` | clearly identifying | "alice@acme.com told me yesterday that…" |
-| `secret` | regulated / confidential | passport number, medical record, attorney–client matter |
+| `secret` | regulated / confidential | passport number, medical record, banking credentials |
 
 Each adapter declares its highest allowed tier in its constructor. The `AnthropicAdapter` hard-blocks `secret` and raw `private` content at construction — a mis-configured deploy fails fast instead of silently leaking. Cohort blending lets `private` content go through with k-anonymous neighbors mixed in.
 
@@ -85,22 +85,6 @@ const tier = classify(userText);          // → 'public' | 'caution' | 'private
 const reply = await veil.complete(userText);
 ```
 
-## KVKK (Turkish data-protection law) compliance suite
-
-The TS side ships ready-to-use handlers for KVKK Madde 11 data-subject rights:
-
-- **Madde 11 (b) + (c)** — Subject Access Request: every document the data subject's identifier touches, exported as a signed PDF
-- **Madde 11 (d)** — correction / amendment
-- **Madde 11 (e) + (f)** — deletion / destruction with two-stage confirmation + TC-checksum verification
-- **Madde 5** — controller config, processing-purpose declarations, retention periods
-
-```ts
-import { executeKVKKDeletion, generateSARPdf } from '@abgnydn/veil';
-
-const pdf = await generateSARPdf({ subject: tcKimlik, docs: matchingDocs });
-const audit = await executeKVKKDeletion({ subject: tcKimlik, reason: 'Madde 11/e' });
-```
-
 ## Dev
 
 ```bash
@@ -128,9 +112,12 @@ veil/
 │   ├── interface.ts        VeilBackend + tier algebra + error classes
 │   ├── classifier.ts       caution-biased heuristic classifier
 │   ├── cohort.ts           k-anonymous cohort blender
+│   ├── router.ts           input + fetch checkpoints with hard invariants
 │   ├── anthropic.ts        Anthropic adapter
 │   ├── openai-compat.ts    Ollama / LM Studio / llamafile / vLLM (SSE streaming)
-│   └── kvkk-*.ts           KVKK Madde 11 compliance suite
+│   ├── webllm.ts           in-browser WebLLM adapter
+│   ├── transformers-js.ts  on-device embed + zero-shot classifier + NER
+│   └── zerotvm.ts          experimental secret-tier-eligible backend
 └── docs/VEIL.md            full design spec
 ```
 
@@ -138,8 +125,8 @@ veil/
 
 WIP — neither half is "done":
 
-- **Rust** is at Phase 0.5b (regex detector + ProviderClient wrapping + streamed reverse-map). Phase 1 swaps `RegexDetector` for `BitnetDetector` against a local BitNet inference server.
-- **TypeScript** ships the KVKK compliance work and adapters, but the MCP tier-enforcement hook is unfinished.
+- **Rust** is at Phase 0.5b (regex detector + ProviderClient wrapping + streamed reverse-map). Phase 1 swaps `RegexDetector` for a learned detector against a local inference server.
+- **TypeScript** ships the adapters + tier router, but the tier-enforcement hook against a real MCP / proxy server is still unfinished.
 - The two halves don't share a runtime yet. Pick one as canonical or maintain both with the shared spec in [`docs/VEIL.md`](./docs/VEIL.md).
 
 ## License

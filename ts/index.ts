@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// the host application Veil — privacy layer (sensitivity routing + cohort blending + adapters).
-// Per Talos's VEIL.md spec; canonized 2026-04-26 in _pantheon/talos.md.
+// veil — privacy layer (sensitivity routing + cohort blending + adapters).
 
 // Interface + tier algebra + errors
 export {
@@ -34,7 +33,7 @@ export {
   unsupported,
 } from "./classifier";
 
-// Phase 8 cohort blender (k-anon)
+// Cohort blender (k-anon for the `private` tier)
 export {
   cohortBlend,
   flattenCohort,
@@ -65,9 +64,7 @@ export {
   type SecretGuard,
 } from "./anthropic";
 
-// Adapter — Zero-TVM (the experimental, secret-tier-eligible showcase backend;
-// wraps github.com/abgnydn/zero-tvm via a git submodule. See zerotvm.ts for the
-// one-time setup command and ZeroTVMCard.tsx for the in-product showcase copy.)
+// Adapter — Zero-TVM (experimental, secret-tier-eligible local backend)
 export {
   ZeroTVMAdapter,
   ZERO_TVM_DESCRIPTION,
@@ -75,8 +72,8 @@ export {
   type ZeroTVMAdapterOpts,
 } from "./zerotvm";
 
-// Adapter — OpenAI-compat HTTP (lingua-franca local-server backend; covers
-// Ollama, LM Studio, llamafile, vLLM, llama.cpp via the /v1 surface)
+// Adapter — OpenAI-compat HTTP (covers Ollama, LM Studio, llamafile, vLLM,
+// llama.cpp via the /v1 surface)
 export {
   OpenAICompatAdapter,
   type OpenAICompatAdapterOpts,
@@ -90,90 +87,3 @@ export {
   type TransformersJSAdapterOpts,
   type InitProgressEvent,
 } from "./transformers-js";
-
-// KVKK profile — Themis's regulated-domain bundle for the Example sibling
-// deployment. Locks the tool surface, forces per-doc approval, pins TR locale.
-// See _pantheon/themis.md.
-export {
-  KVKK_PROFILE,
-  KVKKLockedError,
-  assertNotLocked,
-  isLockedTool,
-  type KVKKProfile,
-  type ForcedTierPolicy,
-  type AuditVisibility,
-  type KVKKLocale,
-} from "./kvkk-profile";
-
-// KVKK consent-log PDF formatter — Themis's bar-association-grade export.
-// Pure function: takes audit rows + opts, returns a jsPDF doc the caller
-// triggers `.save()` on. See `apps/web/src/components/app/KVKKConsentExport.tsx`
-// for the SPA wiring.
-export {
-  formatConsentLog,
-  computeRowsHash,
-  canonicalizeRow,
-  canonicalizeRows,
-  consentLogFilename,
-  type KVKKAuditRow,
-  type KVKKPdfOptions,
-} from "./kvkk-pdf";
-
-// KVKK Madde 11 right-to-be-forgotten engine — Themis's deletion flow for
-// the Example sibling deployment. Pure async function with a
-// dependency-injected I/O surface (Dexie / Yjs / embeddings / audit are
-// all caller-supplied). The SPA component
-// `apps/web/src/components/app/DataDeletionRequest.tsx` is the
-// surface; live wiring to storage is owned by Hephaestus 2/3.
-export {
-  executeKVKKDeletion,
-  computeArgsHash,
-  canonicalizeRecord,
-  KVKK_DELETE_TOOL,
-  KVKK_DELETE_PREVIEW,
-  type KVKKGrounds,
-  type DeletionRequest,
-  type DeletionRecord,
-  type DeletionContext,
-  type DeletionCandidate,
-  type AuditRow,
-} from "./kvkk-deletion";
-
-// KVKK Madde 11(b)+(c) Subject Access Request engine — Themis's read-only
-// "show me what we have on this subject" flow. Pure async with a
-// dependency-injected I/O surface (findDocsBySubject + findConsentRecords
-// + appendAuditRow). The SPA component
-// `apps/web/src/components/app/DataAccessRequest.tsx` is the
-// surface; live wiring to storage is owned by Hephaestus 3.
-export {
-  executeKVKKSAR,
-  computeSARArgsHash,
-  canonicalizeSARRecord,
-  truncateExcerpt,
-  KVKK_SAR_TOOL,
-  KVKK_SAR_PREVIEW,
-  type SARRequest,
-  type SARRecord,
-  type SARContext,
-  type SARDocMatch,
-  type SARConsentRecord,
-  type ProcessingPurpose,
-  type AuditRow as KVKKSARAuditRow,
-} from "./kvkk-sar";
-
-// KVKK SAR PDF formatter — Section 1 - 6 layout, bilingual headings, TR/EN
-// cover-sheet language toggle. Companion to kvkk-pdf.ts (consent-log).
-export {
-  formatSARPdf,
-  sarPdfFilename,
-  sarJsonFilename,
-  type KVKKSARPdfOptions,
-} from "./kvkk-sar-pdf";
-
-// Controller-level KVKK Madde 11(c) declarations — purposes, categories,
-// recipients, retention, controller contact. Static config Example
-// ships with; SAR engine inlines these into every record.
-export {
-  EXAMPLE_CONTROLLER_CONFIG,
-  type KVKKControllerConfig,
-} from "./kvkk-controller-config";

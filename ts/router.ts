@@ -56,26 +56,6 @@ export interface Ctx {
    * Default 0.2 per VEIL.md §3.1.
    */
   escalationMargin?: number;
-  /**
-   * KVKK regulated-domain mode. Set true for the Example sibling
-   * deployment. Under KVKK:
-   *   - The router REFUSES any remote-tier dispatch without explicit
-   *     per-call approval. Even `public` no longer auto-flows to a remote
-   *     adapter — the dispatcher must consult the gate first.
-   *   - The recommendedAdapter for non-local-eligible tiers is rewritten to
-   *     the local default; if no local adapter is available, the router
-   *     fails closed with VeilRoutingError.
-   * The gate (`apps/mcp/src/permission.ts`) is the actual approval surface;
-   * the router only signals the policy via `kvkkApprovalRequired` on the
-   * RouteResult.
-   */
-  kvkkMode?: boolean;
-  /**
-   * Hook called when KVKK mode requires explicit approval before remote
-   * dispatch. Returns `'allow'` to proceed, `'deny'` to fail closed. When
-   * unset under KVKK mode, the router treats remote dispatch as denied.
-   */
-  kvkkApproval?: (info: { tier: Tier; adapterId: string }) => Promise<"allow" | "deny">;
 }
 
 // ---- Defaults ---------------------------------------------------------------
@@ -115,13 +95,6 @@ export interface RouteResult {
   cohortPlan?: CohortPlan;
   /** True when the escalation rule fired. Diagnostic. */
   escalated: boolean;
-  /**
-   * Set true when KVKK mode is on AND the dispatcher must show a fresh
-   * approval modal before any remote-adapter dispatch. The router has
-   * already verified that an `kvkkApproval` hook (or an external gate)
-   * granted permission — this flag is for the audit trail.
-   */
-  kvkkApprovalRequired?: boolean;
 }
 
 // ---- The router ------------------------------------------------------------
@@ -150,40 +123,7 @@ export async function routeMessage(
   const tier: Tier = escalated ? bumpTier(baseTier) : baseTier;
 
   // ---- Hard-invariant filter on adapter selection -----------------------
-  let recommendedAdapter = pickAdapter(tier, preferences, ctx.adapters);
-
-  // ---- KVKK gate: refuse remote dispatch without explicit approval ------
-  // Under regulated mode the router cannot auto-route to a remote adapter
-  // for ANY tier (not even `public`). The dispatcher must obtain fresh
-  // per-call approval through `ctx.kvkkApproval` first; absent that hook,
-  // we either fall back to a local adapter or fail closed.
-  let kvkkApprovalRequired = false;
-  if (ctx.kvkkMode) {
-    const chosen = ctx.adapters?.[recommendedAdapter];
-    const isRemote = chosen ? chosen.capabilities.runsLocally !== true : false;
-    if (isRemote) {
-      kvkkApprovalRequired = true;
-      const verdict = ctx.kvkkApproval
-        ? await ctx.kvkkApproval({ tier, adapterId: recommendedAdapter })
-        : "deny";
-      if (verdict === "deny") {
-        // Try to fall back to a local adapter that can serve this tier.
-        const localFallback = ctx.adapters
-          ? Object.values(ctx.adapters).find(
-              (a) =>
-                a.capabilities.runsLocally === true &&
-                a.capabilities.maxTiersAllowed.includes(tier),
-            )
-          : undefined;
-        if (!localFallback) {
-          throw new VeilRoutingError(
-            `KVKK mode: remote adapter "${recommendedAdapter}" denied for tier '${tier}', no local fallback available.`,
-          );
-        }
-        recommendedAdapter = localFallback.id;
-      }
-    }
-  }
+  const recommendedAdapter = pickAdapter(tier, preferences, ctx.adapters);
 
   // Branch on the resolved tier.
   switch (tier) {
@@ -198,7 +138,6 @@ export async function routeMessage(
         recommendedAdapter,
         scores,
         escalated,
-        kvkkApprovalRequired,
       };
     }
 
@@ -226,7 +165,6 @@ export async function routeMessage(
         scores,
         cohortPlan: plan,
         escalated,
-        kvkkApprovalRequired,
       };
     }
 
@@ -248,7 +186,6 @@ export async function routeMessage(
         recommendedAdapter,
         scores,
         escalated,
-        kvkkApprovalRequired,
       };
     }
   }

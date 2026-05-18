@@ -33,7 +33,7 @@ ts/
 ├── cohort.ts           k-anonymous cohort blender
 ├── anthropic.ts        Anthropic adapter (hard-blocks secret + raw private at construction)
 ├── openai-compat.ts    Ollama / LM Studio / llamafile / vLLM adapter (SSE streaming)
-└── kvkk-*.ts           KVKK Madde 11 (b/c/d/e/f) compliance suite
+└── router.ts           input + fetch checkpoints with hard invariants
 docs/VEIL.md            full design spec
 ```
 
