@@ -1,0 +1,19 @@
+{
+  "name": "veil",
+  "version": "0.1.0",
+  "description": "A privacy layer between your app and any third-party LLM. Pseudonymizes emails, paths, URLs, IPs deterministically before the wire.",
+  "license": "Apache-2.0",
+  "author": "Ahmet Barış Günaydın <hi@barisgunaydin.com>",
+  "private": true,
+  "workspaces": ["ts"],
+  "scripts": {
+    "build": "npm run build:ts && npm run build:rust",
+    "build:ts": "npm run build --workspace=@abgnydn/veil",
+    "build:rust": "cd rust && cargo build --release",
+    "test": "npm run test:ts && npm run test:rust",
+    "test:ts": "npm test --workspace=@abgnydn/veil",
+    "test:rust": "cd rust && cargo test",
+    "typecheck": "npm run typecheck --workspace=@abgnydn/veil",
+    "clean": "npm run clean --workspace=@abgnydn/veil && cd rust && cargo clean"
+  }
+}

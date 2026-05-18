@@ -1,0 +1,10 @@
+node_modules/
+dist/
+target/
+.turbo/
+.DS_Store
+*.log
+coverage/
+.env
+.env.local
+Cargo.lock.user

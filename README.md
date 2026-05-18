@@ -1,26 +1,147 @@
 # veil
 
-A privacy layer that sits between your application and any third-party LLM. veil pseudonymizes emails, file paths, URLs, and IPs deterministically before the request hits the wire, then reverses the mapping on the response — including streamed tokens. Round-trip-stable, so the model sees `EMAIL_1` and you see `alice@acme.com` back.
+> A privacy layer between your app and any third-party LLM. The model sees `EMAIL_1`; the user sees `alice@acme.com` back.
 
-## Two implementations
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg)](https://www.typescriptlang.org/)
 
-| | path | what it is |
-|---|---|---|
-| Rust crate | `rust/` | Regex pseudonymizer, `ProviderClient` wrapping variant, streamed `MessageStream` reverse-mapping. Phase 0.5. |
-| TypeScript adapters | `ts/` | Interface + tier algebra, classifier, k-anonymous cohort blender, Anthropic + OpenAI-compat adapters, KVKK Madde 11 (b/c/d/e/f) compliance suite (deletion, subject-access request, PDF export). |
+```
+                ┌───────────────┐
+   alice@acme   │     veil      │   EMAIL_1
+   /Users/...   │   ─── ▶ ───   │   PATH_1
+   192.168.x.y  │   ◀ ─── ◀ ─   │   IP_1
+                └───────────────┘
+                  pseudonymize
+                  forward
+                  reverse-map
+```
 
 ## Why
 
-LLM prompts leak PII by default. Once an email or document path goes upstream, it's logged, cached, possibly trained on. veil intercepts the request at the SDK boundary, swaps real identifiers for stable pseudonyms, asks the model, and rewrites the answer back to the user's view. The model sees no real names; the user sees no pseudonyms.
+LLM prompts leak PII by default. Once an email or document path goes upstream, it's logged, cached, possibly trained on. veil sits between your app and the provider, swaps real identifiers for stable pseudonyms (`EMAIL_1`, `PATH_1`, `URL_1`, `IP_1`) before the wire, asks the model, and rewrites the answer back — including streamed tokens.
+
+Round-trip stability is load-bearing: send "remind alice@acme.com" → model sees "remind EMAIL_1" → model says "Reminded EMAIL_1." → user sees "Reminded alice@acme.com." Across many turns of the same conversation the mapping stays consistent, so the model can reason about "the user mentioned earlier" without ever learning a real name.
+
+## What's in the box
+
+| | path | language | what it ships |
+|---|---|---|---|
+| **rust crate** | `rust/` | Rust 1.75+ | Regex pseudonymizer, `ProviderClient::Veil` wrapping variant, streamed `MessageStream` reverse-mapping. 3 commits across Phase 0 / 0.5a / 0.5b. |
+| **typescript adapters** | `ts/` | TS 5 + Bun | Backend interface + tier algebra, caution-biased classifier, k-anonymous cohort blender, adapters for Anthropic + OpenAI-compat (Ollama, LM Studio, llamafile, vLLM), KVKK Madde 11 (b / c / d / e / f) compliance suite — deletion, subject-access request, PDF export. |
+
+The two halves do not talk to each other yet. See "Status" below.
 
 ## Tier algebra
 
-veil classifies content into four tiers — `public`, `caution`, `private`, `secret` — and refuses to forward higher tiers to providers that aren't allowlisted for them. Adapter constructors enforce the algebra (e.g. the Anthropic adapter hard-blocks secret + raw private at construction, so a mis-configured deploy fails fast instead of silently leaking).
+veil classifies content into four tiers and enforces them at adapter construction:
+
+| tier | what it is | example |
+|---|---|---|
+| `public` | safe for any provider | "what's the capital of France" |
+| `caution` | mildly identifying | "my project uses React 18" |
+| `private` | clearly identifying | "alice@acme.com told me yesterday that…" |
+| `secret` | regulated / confidential | passport number, medical record, attorney–client matter |
+
+Each adapter declares its highest allowed tier in its constructor. The `AnthropicAdapter` hard-blocks `secret` and raw `private` content at construction — a mis-configured deploy fails fast instead of silently leaking. Cohort blending lets `private` content go through with k-anonymous neighbors mixed in.
+
+## Quick start — Rust
+
+```bash
+git clone https://github.com/abgnydn/veil.git
+cd veil/rust
+cargo build --release
+cargo test
+```
+
+```rust
+use veil::{Veil, ProviderClient};
+
+let veil = Veil::new();
+let client = ProviderClient::Veil(Box::new(real_anthropic_client), veil);
+
+// Real names go in; pseudonyms go to the wire; real names come back.
+let stream = client.send_message_stream("Remind alice@acme.com about the demo").await?;
+```
+
+## Quick start — TypeScript
+
+```bash
+git clone https://github.com/abgnydn/veil.git
+cd veil
+npm install
+npm run build      # builds both ts/ (tsup) and rust/ (cargo --release)
+```
+
+```ts
+import { AnthropicAdapter, Veil, classify } from '@abgnydn/veil';
+
+const veil = new Veil({
+  adapter: new AnthropicAdapter({ apiKey: process.env.ANTHROPIC_API_KEY }),
+  highestAllowed: 'caution', // refuse to forward private / secret
+});
+
+const tier = classify(userText);          // → 'public' | 'caution' | 'private' | 'secret'
+const reply = await veil.complete(userText);
+```
+
+## KVKK (Turkish data-protection law) compliance suite
+
+The TS side ships ready-to-use handlers for KVKK Madde 11 data-subject rights:
+
+- **Madde 11 (b) + (c)** — Subject Access Request: every document the data subject's identifier touches, exported as a signed PDF
+- **Madde 11 (d)** — correction / amendment
+- **Madde 11 (e) + (f)** — deletion / destruction with two-stage confirmation + TC-checksum verification
+- **Madde 5** — controller config, processing-purpose declarations, retention periods
+
+```ts
+import { executeKVKKDeletion, generateSARPdf } from '@abgnydn/veil';
+
+const pdf = await generateSARPdf({ subject: tcKimlik, docs: matchingDocs });
+const audit = await executeKVKKDeletion({ subject: tcKimlik, reason: 'Madde 11/e' });
+```
+
+## Dev
+
+```bash
+# Both halves
+npm install
+npm run build       # ts (tsup) + rust (cargo --release)
+npm test            # ts (bun test) + rust (cargo test)
+npm run typecheck
+
+# Just the TypeScript adapters
+cd ts && npm install && npm run build
+
+# Just the Rust crate
+cd rust && cargo build --release && cargo test
+```
+
+## Layout
+
+```
+veil/
+├── rust/
+│   ├── src/                Phase 0 regex pseudonymizer + Phase 0.5 ProviderClient + streaming
+│   ├── examples/, tests/, Cargo.toml
+├── ts/
+│   ├── interface.ts        VeilBackend + tier algebra + error classes
+│   ├── classifier.ts       caution-biased heuristic classifier
+│   ├── cohort.ts           k-anonymous cohort blender
+│   ├── anthropic.ts        Anthropic adapter
+│   ├── openai-compat.ts    Ollama / LM Studio / llamafile / vLLM (SSE streaming)
+│   └── kvkk-*.ts           KVKK Madde 11 compliance suite
+└── docs/VEIL.md            full design spec
+```
 
 ## Status
 
-WIP. The Rust crate is at Phase 0.5; Phase 1 swaps the regex detector for a BitNet detector. The TS adapters ship the KVKK compliance work but the MCP tier-enforcement hook is unfinished. Pick one as canonical or maintain both with the shared spec in `docs/VEIL.md`.
+WIP — neither half is "done":
+
+- **Rust** is at Phase 0.5b (regex detector + ProviderClient wrapping + streamed reverse-map). Phase 1 swaps `RegexDetector` for `BitnetDetector` against a local BitNet inference server.
+- **TypeScript** ships the KVKK compliance work and adapters, but the MCP tier-enforcement hook is unfinished.
+- The two halves don't share a runtime yet. Pick one as canonical or maintain both with the shared spec in [`docs/VEIL.md`](./docs/VEIL.md).
 
 ## License
 
-Apache-2.0.
+Apache-2.0 — see [LICENSE](./LICENSE).
