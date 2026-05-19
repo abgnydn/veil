@@ -27,7 +27,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "jspdf": "^2.5.1"
+    "jspdf": "^4.2.1"
   },
   "devDependencies": {
     "bun-types": "^1.1.42",
