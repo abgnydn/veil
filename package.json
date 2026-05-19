@@ -5,7 +5,9 @@
   "license": "Apache-2.0",
   "author": "Ahmet Barış Günaydın <hi@barisgunaydin.com>",
   "private": true,
-  "workspaces": ["ts"],
+  "workspaces": [
+    "ts"
+  ],
   "scripts": {
     "build": "npm run build:ts && npm run build:rust",
     "build:ts": "npm run build --workspace=@abgnydn/veil",
