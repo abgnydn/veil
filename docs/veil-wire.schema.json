@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/abgnydn/veil/docs/veil-wire.schema.json",
+  "title": "veil local HTTP wire contract",
+  "description": "Request/response types for the Rust VeilPipeline HTTP seam. See docs/CONTRACT.md. Canonical source of truth for both the Rust server (serde) and the TS RustPipelineClient.",
+  "$defs": {
+    "CanonicalKind": {
+      "description": "Canonical entity kind. The pseudonym prefix is derived per docs/CONTRACT.md §2 (e.g. credit_card -> CC), NOT from this string directly.",
+      "type": "string",
+      "enum": [
+        "email",
+        "url",
+        "ip",
+        "path",
+        "uuid",
+        "phone",
+        "credit_card",
+        "iban",
+        "crypto_address",
+        "api_key",
+        "ssn",
+        "national_id",
+        "dob",
+        "person",
+        "location",
+        "org",
+        "custom"
+      ]
+    },
+    "Pseudonym": {
+      "description": "A pseudonym token: <PREFIX>_<n>, prefix underscore-free uppercase, n a per-(session,kind) 1-based counter.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9]*_[0-9]+$"
+    },
+    "SourceTag": {
+      "type": "string",
+      "enum": ["regex", "ner", "llm", "context"]
+    },
+    "PIISpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "kind", "score", "replacement", "source"],
+      "properties": {
+        "start": {
+          "description": "UTF-8 byte offset, inclusive (docs/CONTRACT.md §3).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "description": "UTF-8 byte offset, exclusive.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": { "$ref": "#/$defs/CanonicalKind" },
+        "score": {
+          "description": "Detector confidence in [0,1].",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "replacement": { "$ref": "#/$defs/Pseudonym" },
+        "source": { "$ref": "#/$defs/SourceTag" }
+      }
+    },
+    "AuditReason": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "kind"],
+          "properties": {
+            "type": { "const": "unknown_pseudonym" },
+            "kind": { "$ref": "#/$defs/CanonicalKind" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "kind"],
+          "properties": {
+            "type": { "const": "likely_leaked" },
+            "kind": { "$ref": "#/$defs/CanonicalKind" }
+          }
+        }
+      ]
+    },
+    "AuditFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end", "text", "reason"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "text": {
+          "description": "The offending token, e.g. 'EMAIL_99' or 'a@b.com'.",
+          "type": "string"
+        },
+        "reason": { "$ref": "#/$defs/AuditReason" }
+      }
+    },
+    "TextReq": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "text"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" }
+      }
+    },
+    "ReplyReq": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "reply"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "reply": { "type": "string" }
+      }
+    },
+    "JsonReq": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "value"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "value": {
+          "description": "Arbitrary JSON; string leaves are walked per docs/CONTRACT.md §4.2."
+        }
+      }
+    },
+    "PseudonymizeRes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "spans"],
+      "properties": {
+        "text": { "type": "string" },
+        "spans": { "type": "array", "items": { "$ref": "#/$defs/PIISpan" } }
+      }
+    },
+    "ReverseMapRes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string" }
+      }
+    },
+    "AuditRes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["findings"],
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AuditFinding" }
+        }
+      }
+    },
+    "PseudonymizeJsonRes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "spans"],
+      "properties": {
+        "value": {},
+        "spans": { "type": "array", "items": { "$ref": "#/$defs/PIISpan" } }
+      }
+    }
+  }
+}

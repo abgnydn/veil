@@ -30,7 +30,10 @@ Round-trip stability is load-bearing: send "remind alice@acme.com" → model see
 | **rust crate** | `rust/` | Rust 1.75+ | Regex pseudonymizer, `ProviderClient::Veil` wrapping variant, streamed `MessageStream` reverse-mapping. 3 commits across Phase 0 / 0.5a / 0.5b. |
 | **typescript adapters** | `ts/` | TS 5 + Bun | Backend interface + tier algebra, caution-biased classifier, k-anonymous cohort blender, adapters for Anthropic + OpenAI-compat (Ollama, LM Studio, llamafile, vLLM), WebLLM, transformers.js. |
 
-The two halves do not talk to each other yet. See "Status" below.
+The TypeScript shell now calls the Rust engine over a loopback HTTP wire
+contract ([`docs/CONTRACT.md`](./docs/CONTRACT.md)): the Rust `veil_server`
+owns the pseudonymization round-trip, and `RustPipelineClient` + `wrapWithVeil`
+run any backend's chat through it. See "Status" below.
 
 ## Tier algebra
 
@@ -39,7 +42,7 @@ veil classifies content into four tiers and enforces them at adapter constructio
 | tier | what it is | example |
 |---|---|---|
 | `public` | safe for any provider | "what's the capital of France" |
-| `caution` | mildly identifying | "my project uses React 18" |
+| `internal` | mildly identifying | "my project uses React 18" |
 | `private` | clearly identifying | "alice@acme.com told me yesterday that…" |
 | `secret` | regulated / confidential | passport number, medical record, banking credentials |
 
@@ -73,16 +76,37 @@ npm install
 npm run build      # builds both ts/ (tsup) and rust/ (cargo --release)
 ```
 
-```ts
-import { AnthropicAdapter, Veil, classify } from '@abgnydn/veil';
+There's no single `Veil` facade yet: the router classifies + emits an adapter
+recommendation, and the caller dispatches. (See [Status](#status).)
 
-const veil = new Veil({
-  adapter: new AnthropicAdapter({ apiKey: process.env.ANTHROPIC_API_KEY }),
-  highestAllowed: 'caution', // refuse to forward private / secret
+```ts
+import {
+  AnthropicAdapter,
+  routeMessage,
+  classifyTierArgmax,
+} from '@abgnydn/veil';
+
+// Adapters read settings through getters, so keys can rotate at runtime. The
+// constructor hard-blocks `secret` + raw `private` — a mis-tiered dispatch
+// throws instead of leaking.
+const anthropic = new AnthropicAdapter({
+  settings: {
+    getApiKey: () => process.env.ANTHROPIC_API_KEY ?? null,
+    getDefaultModel: () => 'claude-sonnet-4-6',
+  },
 });
 
-const tier = classify(userText);          // → 'public' | 'caution' | 'private' | 'secret'
-const reply = await veil.complete(userText);
+// 1. Classify locally — never on the remote model.
+const tier = classifyTierArgmax(userText); // 'public' | 'internal' | 'private' | 'secret'
+
+// 2. Route. public/internal pass through; `private` is cohort-blended (needs a
+//    vault); `secret` fails closed unless a local adapter is registered.
+const route = await routeMessage(userText, { adapters: { anthropic } });
+
+// 3. Dispatch the router's transformed input and stream tokens back.
+for await (const tok of anthropic.chat(route.transformedInput)) {
+  process.stdout.write(tok.text);
+}
 ```
 
 ## Dev
@@ -123,11 +147,21 @@ veil/
 
 ## Status
 
-WIP — neither half is "done":
+WIP, but the two halves now connect. Canonical path: **Rust engine + TS shell**
+(see [`CLAUDE.md`](./CLAUDE.md)).
 
-- **Rust** is at Phase 0.5b (regex detector + ProviderClient wrapping + streamed reverse-map). Phase 1 swaps `RegexDetector` for a learned detector against a local inference server.
-- **TypeScript** ships the adapters + tier router, but the tier-enforcement hook against a real MCP / proxy server is still unfinished.
-- The two halves don't share a runtime yet. Pick one as canonical or maintain both with the shared spec in [`docs/VEIL.md`](./docs/VEIL.md).
+- **Rust** is the canonical pseudonymization engine (regex detector, coref, re-ID
+  auditor, JSON tool-call walking), exposed over a loopback HTTP server
+  (`cargo run --bin veil_server`) implementing the wire contract in
+  [`docs/CONTRACT.md`](./docs/CONTRACT.md). Phase 1 swaps `RegexDetector` for a
+  learned detector against a local inference server.
+- **TypeScript** is the tier router + adapter ecosystem. `RustPipelineClient`
+  calls the engine; `wrapWithVeil` runs the pseudonymize → forward →
+  reverse-map round-trip around any backend's chat (with streamed reverse-map
+  that survives token boundaries). Browser NER (`transformers-js`) is the
+  fallback when no local engine answers `/v1/health`.
+- Still open: the end-to-end tier-enforcement hook against a real MCP / proxy
+  server, and Phase 1's learned detector. See [`docs/VEIL.md`](./docs/VEIL.md).
 
 ## License
 

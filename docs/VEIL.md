@@ -494,6 +494,35 @@ These are the design decisions Veil cannot make on the user's behalf. Listed in 
 
 ---
 
+## 7.1 Resolutions (v1 — decided 2026-06-08)
+
+The canonical path is now **Rust engine + TS shell** (see `../CLAUDE.md`), and an
+end-to-end MCP consumer (`../examples/mcp-server/`) is wired. That changes the
+footing for several of these: some are now answered by what shipped, others are
+explicitly punted with a revisit date. Each decision below supersedes the
+recommendation above where they differ.
+
+| # | Question | v1 decision | Status |
+|---|---|---|---|
+| 1 | Anthropic fallback | **Ship it.** `AnthropicAdapter` is built; `VeilEnforcer` uses the remote for `public`/`internal` and for `private` *after* pseudonymization. The thesis is protected by invariant, not by omission: `secret` and raw `private` never reach it. | **Decided** — implemented. |
+| 2 | Default secret-tier backend | **Ollama (OpenAI-compat local), not Zero-TVM.** Zero-TVM is Phi-3-only, ~22% slower, and currently a stub (needs the vendored submodule). Ollama is what actually runs end-to-end in the enforcer today. Zero-TVM stays the opt-in *showcase* backend once vendored — a UX choice, not the secret-tier default. Honest divergence from Talos's pick. | **Decided** — reflects built wiring. |
+| 3 | Escalation threshold | **One global knob, default 0.2.** Implemented as `VeilEnforcer`/`routeMessage` `escalationMargin`. Per-tier asymmetry deferred until there are logs to set it from. | **Decided** — implemented. |
+| 4 | Default cohort K | **K=8 stands; cohort fan-out is NOT wired in v1.** The enforcer's `private` path pseudonymizes but does not yet fan out the k−1 siblings (the cohort blender is still a stub — see §4 and the limitation note below). Revisit when the PUPA harness (Phase 9) lands or by **2026-09-01**, whichever is first. | **Punted (dated).** |
+| 5 | PII vs ambiguous-PII | **Auto-pseudonymize the deterministic regex kinds; defer ambiguous NER kinds to Phase 1.** The Rust `RegexDetector` already auto-pseudonymizes `email/url/ip/path/uuid` (high precision). `person`/`location`/`org` need the learned detector (`BitnetDetector`, Phase 1, not yet built); until then they are **audit-log-only** (`AuditReason::LikelyLeaked`), matching the auditor's existing "watch the FP rate before escalating" stance. The LLM-disambiguation path (Talos's pick (c)) is reconsidered once Phase 1 exists. | **Decided (v1) / revisit with Phase 1.** |
+| 6 | Default browser NER model | **GLiNER (`gliner_multi_pii-v1`) for the browser fallback, spaCy fallback on init failure.** Low priority now: with the Rust engine canonical, `transformers-js` NER is only the no-server fallback, off the critical path. Revisit when the browser shell ships. | **Punted (dated)** — by **2026-09-01**. |
+| 7 | OPFS budget | **Warn >75%, refuse >90%, never silently delete.** A browser-shell concern only (WebLLM/Zero-TVM/transformers-js); the Rust-engine path doesn't touch OPFS. Decided in principle; enforced when the browser shell is built. | **Decided (principle)** — implement with browser shell. |
+
+### v1 limitation to surface (re: #4)
+
+`VeilEnforcer` protects `private` content by **pseudonymization** (real entities
+→ `EMAIL_1`, reverse-mapped on return), which is shipped and tested. It does
+**not** yet apply **cohort blending** (the k-anonymous fan-out of §4). Until the
+cohort blender lands, do not describe v1 as providing the §4 k-anonymity
+guarantee — it provides pseudonymization only. This is a deliberate scope cut,
+not an oversight.
+
+---
+
 ## Appendix A — file layout (sketch, for the implementer)
 
 ```
