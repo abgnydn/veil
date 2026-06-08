@@ -237,7 +237,7 @@ fn merge_spans(
             out.push(s);
         }
     }
-    out.sort_by(|a, b| a.start.cmp(&b.start));
+    out.sort_by_key(|d| d.start);
     out
 }
 
