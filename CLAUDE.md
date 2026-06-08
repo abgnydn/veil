@@ -115,13 +115,25 @@ rust/
 ├── tests/, examples/, Cargo.toml
 ts/
 ├── interface.ts        VeilBackend + tier algebra + error classes
-├── classifier.ts       caution-biased heuristic classifier
-├── cohort.ts           k-anonymous cohort blender
+├── rust-client.ts      typed engine client (calls veil_server)
+├── enforce.ts          VeilEnforcer — the canonical tier-enforcement + cohort path
+├── veil-wrap.ts        streaming pseudonymize/reverse-map round-trip
+├── cohort-scramble.ts  per-cohort number scramble (fingerprint defense)
 ├── anthropic.ts        Anthropic adapter (hard-blocks secret + raw private at construction)
 ├── openai-compat.ts    Ollama / LM Studio / llamafile / vLLM adapter (SSE streaming)
-└── router.ts           input + fetch checkpoints with hard invariants
-docs/VEIL.md            full design spec
+├── classifier.ts       caution-biased heuristic classifier
+├── cohort.ts           ⚠️ LEGACY stub (cohortBlend/VaultRef) — superseded by engine /v1/cohort
+└── router.ts           ⚠️ LEGACY routing primitive (routeMessage) — superseded by VeilEnforcer
+examples/mcp-server/    MCP consumer · examples/gliner-detector/  GLiNER NER server + eval
+docs/VEIL.md            full design spec · docs/CONTRACT.md  wire contract
 ```
+
+> **Legacy note:** `ts/cohort.ts` (the `VaultRef`/`cohortBlend` stub) and
+> `ts/router.ts` (`routeMessage`) predate the Rust-engine canonical path and are
+> used by no real consumer (only their own tests + `index.ts` re-export). The
+> live path is `VeilEnforcer` + engine `/v1/cohort` + `cohort-scramble`. They're
+> kept (still exported, still green) but are candidates for removal — gate that
+> on an explicit decision since it drops public exports.
 
 ## Working agreement
 
