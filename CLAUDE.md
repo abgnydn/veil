@@ -91,9 +91,13 @@ would re-implement the entire tested Rust engine in TypeScript.
    `VeilEnforcer.cohortK>1` fans out k shuffled, side-channel-symmetric prompts,
    keeps the real response, reverse-maps it; MCP example reads `VEIL_COHORT_K`.
    Verified live: k=4 → 4 kind-shape-identical prompts, distinct pseudonym sets,
-   real reverse-maps / siblings don't. **Residual §4.3 caveats open**
-   (pool-range fingerprint, deterministic synthesis → per-session pool
-   randomization, deferred 2026-09-01). Off by default (k× provider cost).
+   real reverse-maps / siblings don't. **Hardened** (2026-06-08): the enforcer
+   now crypto-scrambles every pseudonym number into one random space
+   (`ts/cohort-scramble.ts`) + shuffles, **closing** the §4.3 pool-range
+   fingerprint, deterministic-synthesis, and positional caveats (verified live:
+   wire shows `EMAIL_919463`-style randoms, no `EMAIL_1`/`EMAIL_10001` tell).
+   Still open: content-template reveal (needs vault-neighbor siblings —
+   embeddings/KNN, not built) and timing side-channel. Off by default (k× cost).
 
 **Acceptance for this Resume — ALL MET (2026-06-08):**
 - ✅ One canonical path decided and documented at the top of this file (2026-06-05).

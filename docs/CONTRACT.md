@@ -288,8 +288,20 @@ POST /v1/cohort  { "session_id": "...", "text": "...", "k": 8 }
 - **Cost:** k× provider calls. **Batch only** — streaming-with-cohort is future
   work. Backed by Rust `StaticPoolSynthesizer` + `substitute_pseudonyms`.
 
-**Residual caveats (VEIL.md §4.3, not yet closed):** the pool uses a reserved
-numeric range (`*_10001+`), so an adversary who knows the scheme can still
-partition real vs sibling by number; and synthesis is deterministic across
-turns. Per-session pool randomization is the fix, deferred. Positional
-fingerprinting *is* closed (the caller shuffles).
+**Closed caveats** (the caller, `VeilEnforcer`, handles these):
+- *Pool-range fingerprint.* The enforcer scrambles every pseudonym number
+  across all k prompts into one crypto-random space per kind, so the real
+  prompt no longer carries the tell-tale low number (`EMAIL_1`) nor siblings the
+  pool number (`EMAIL_10001`). The real reply is un-scrambled before reverse-map.
+- *Deterministic synthesis.* The scramble is fresh per call, so the same real
+  set no longer produces the same wire numbers across turns.
+- *Positional fingerprint.* The cohort is shuffled before dispatch.
+
+**Still open:**
+- *Content-template reveal.* Siblings are renumbered copies of the real prompt,
+  so all k share the same non-pseudonym text — the adversary learns the prompt's
+  shape/topic, just not which entity set is real. Hiding content needs genuinely
+  different sibling prompts (the vault-neighbor approach of §4.1: embeddings +
+  K-NN over a local note store, not yet built).
+- *Timing side-channel.* Fan-out is concurrent but an adversary with precise
+  timing could still correlate. Mitigation deferred.

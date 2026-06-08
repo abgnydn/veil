@@ -383,12 +383,17 @@ For a `private` text whose pseudonymized entity set is `E = {e_1, ..., e_n}`:
 | Pool source | **`StaticPoolSynthesizer`**, reserved range `*_10001..=*_10016` | Deterministic. Per-session pool randomization is deferred to Phase 8 v2 (E29 documents the residual fingerprint risk). |
 | Failure mode | **`Drop`** (fail-open) by default; `Abort` (fail-closed) opt-in per-tier | E29's `CohortFailure` enum. |
 
-### 4.3 What this does NOT solve (still true, ship the caveats)
+### 4.3 Threat-model status (updated 2026-06-08)
 
-Verbatim from E29's threat-model section:
-- **Request-time jitter.** Serial dispatch via one `reqwest` client; an adversary with µs-precision can fingerprint. Mitigation deferred.
-- **Pool-range fingerprint.** `EMAIL_10001` vs `EMAIL_1` is distinguishable by number alone. Mitigation deferred to per-session pool randomization (Phase 8 v2).
-- **Streaming.** Cohort fan-out is batch-only in v1; streaming-with-cohort is documented as future work.
+**Closed in the shipped implementation** (`VeilEnforcer.cohortDispatch` + `ts/cohort-scramble.ts`):
+- **Pool-range fingerprint** (`EMAIL_10001` vs `EMAIL_1`). The enforcer scrambles every pseudonym number across all k prompts into one crypto-random space per kind, then un-scrambles the real reply before reverse-map. Real and siblings are now numerically indistinguishable.
+- **Determinism.** The scramble is fresh per call, so the same real set no longer yields the same wire numbers across turns.
+- **Positional fingerprint.** The cohort is shuffled before dispatch.
+
+**Still open (ship the caveats):**
+- **Content-template reveal.** Siblings are renumbered copies of the real prompt, so all k share the same non-pseudonym text — the adversary learns the prompt's shape/topic, not which entity set is real. Hiding content needs genuinely different sibling prompts (the vault-neighbor approach of §4.1: embeddings + K-NN over a local note store — not yet built).
+- **Request-time jitter.** Fan-out is concurrent (`Promise.all`), but an adversary with µs-precision timing could still correlate. Mitigation deferred.
+- **Streaming.** Cohort fan-out is batch-only; streaming-with-cohort is future work.
 
 These caveats are surfaced in the Veil settings panel (§6) so the user knows what they're getting.
 
@@ -507,7 +512,7 @@ recommendation above where they differ.
 | 1 | Anthropic fallback | **Ship it.** `AnthropicAdapter` is built; `VeilEnforcer` uses the remote for `public`/`internal` and for `private` *after* pseudonymization. The thesis is protected by invariant, not by omission: `secret` and raw `private` never reach it. | **Decided** — implemented. |
 | 2 | Default secret-tier backend | **Ollama (OpenAI-compat local), not Zero-TVM.** Zero-TVM is Phi-3-only, ~22% slower, and currently a stub (needs the vendored submodule). Ollama is what actually runs end-to-end in the enforcer today. Zero-TVM stays the opt-in *showcase* backend once vendored — a UX choice, not the secret-tier default. Honest divergence from Talos's pick. | **Decided** — reflects built wiring. |
 | 3 | Escalation threshold | **One global knob, default 0.2.** Implemented as `VeilEnforcer`/`routeMessage` `escalationMargin`. Per-tier asymmetry deferred until there are logs to set it from. | **Decided** — implemented. |
-| 4 | Default cohort K | **K=8 stands; cohort fan-out is now WIRED** (2026-06-08). The engine exposes `/v1/cohort` (Rust `StaticPoolSynthesizer` + `substitute_pseudonyms`) and `VeilEnforcer` fans out k shuffled prompts when `cohortK>1`, keeping the real response. Off by default (`cohortK` unset → pseudonymize-only) since it costs k× provider calls. Residual §4.3 caveats (pool-range fingerprint, deterministic synthesis) still open — per-session pool randomization deferred to **2026-09-01**. | **Decided + shipped (v1).** |
+| 4 | Default cohort K | **K=8 stands; cohort fan-out WIRED + hardened** (2026-06-08). Engine `/v1/cohort` (Rust `StaticPoolSynthesizer` + `substitute_pseudonyms`); `VeilEnforcer` (when `cohortK>1`) scrambles all pseudonym numbers into one crypto-random space, shuffles, fans out, keeps + un-scrambles the real response. This **closes** the §4.3 pool-range-fingerprint, deterministic-synthesis, and positional caveats. Still open: content-template reveal (needs vault-neighbor siblings) and timing. Off by default (k× cost). | **Decided + shipped + hardened.** |
 | 5 | PII vs ambiguous-PII | **Auto-pseudonymize the deterministic regex kinds; defer ambiguous NER kinds to Phase 1.** The Rust `RegexDetector` already auto-pseudonymizes `email/url/ip/path/uuid` (high precision). `person`/`location`/`org` need the learned detector (`BitnetDetector`, Phase 1, not yet built); until then they are **audit-log-only** (`AuditReason::LikelyLeaked`), matching the auditor's existing "watch the FP rate before escalating" stance. The LLM-disambiguation path (Talos's pick (c)) is reconsidered once Phase 1 exists. | **Decided (v1) / revisit with Phase 1.** |
 | 6 | Default browser NER model | **GLiNER (`gliner_multi_pii-v1`) for the browser fallback, spaCy fallback on init failure.** Low priority now: with the Rust engine canonical, `transformers-js` NER is only the no-server fallback, off the critical path. Revisit when the browser shell ships. | **Punted (dated)** — by **2026-09-01**. |
 | 7 | OPFS budget | **Warn >75%, refuse >90%, never silently delete.** A browser-shell concern only (WebLLM/Zero-TVM/transformers-js); the Rust-engine path doesn't touch OPFS. Decided in principle; enforced when the browser shell is built. | **Decided (principle)** — implement with browser shell. |

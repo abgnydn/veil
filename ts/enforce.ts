@@ -28,6 +28,7 @@ import type { Msg, Tier, TierScores, Token, VeilBackend } from "./interface";
 import { classifyTierHeuristic } from "./classifier";
 import type { RustPipelineClient } from "./rust-client";
 import { wrapWithVeil } from "./veil-wrap";
+import { applyPseudonymMap, scrambleCohort } from "./cohort-scramble";
 
 export interface VeilEnforcerOpts {
   /** The Rust engine, used to pseudonymize `private` content before egress. */
@@ -192,21 +193,28 @@ export class VeilEnforcer {
     const { engine, sessionId } = this.opts;
     const plan = await engine.cohort(sessionId, input, k);
 
+    // Scramble every pseudonym number into one random space so the real prompt
+    // (low session #) is indistinguishable from siblings (high pool #) — closes
+    // the pool-range fingerprint, and being fresh per call, the determinism one.
+    const { prompts: scrambled, realDemap } = scrambleCohort(plan.cohort, plan.realIndex);
+
     // Shuffle so the real prompt isn't always at index 0 on the wire — closes
     // the positional-fingerprint caveat the engine leaves to the caller.
-    const order = plan.cohort.map((_, i) => i);
+    const order = scrambled.map((_, i) => i);
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [order[i], order[j]] = [order[j]!, order[i]!];
     }
     const realPos = order.indexOf(plan.realIndex);
-    const prompts = order.map((i) => plan.cohort[i]!);
+    const prompts = order.map((i) => scrambled[i]!);
 
     // Fan out all k with identical opts (side-channel symmetry). Keep the real.
     const responses = await Promise.all(
       prompts.map((content) => collectText(remote.chat([{ role: "user", content }]))),
     );
-    const realResponse = responses[realPos] ?? "";
+    // Un-scramble the real reply (scrambled pseudonyms → session pseudonyms),
+    // then reverse-map to real entities.
+    const realResponse = applyPseudonymMap(responses[realPos] ?? "", realDemap);
     const restored = await engine.reverseMap(sessionId, realResponse);
 
     return {

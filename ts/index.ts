@@ -83,6 +83,13 @@ export {
   type Withheld,
 } from "./enforce";
 
+// Cohort number-scramble (pool-range fingerprint defense for k-anonymity)
+export {
+  scrambleCohort,
+  applyPseudonymMap,
+  type ScrambledCohort,
+} from "./cohort-scramble";
+
 // Adapter — WebLLM (in-browser, default zero-install backend)
 export {
   WebLLMAdapter,
