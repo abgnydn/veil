@@ -44,6 +44,35 @@ python3 server.py            # downloads knowledgator/gliner-pii-base-v1.0 (~1GB
 Env: `VEIL_DETECTOR_BIND` (default `127.0.0.1:8808`), `GLINER_MODEL`,
 `GLINER_THRESHOLD`, `GLINER_STUB=1`.
 
+## Accuracy
+
+`eval.py` runs the real model over a small hand-labeled EN+TR set (person/
+location/org, with ambiguous cases and PII-free negatives) and reports per-kind
+precision/recall/F1 across a threshold sweep. Run: `.venv/bin/python eval.py`.
+
+`gliner-pii-base-v1.0`, relaxed matching, 22 sentences / 34 gold entities — small
+and synthetic, so these show *shape*, not a benchmark F1:
+
+| threshold | precision | recall | F1 |
+|---|---|---|---|
+| 0.3 | 0.76 | 0.91 | 0.83 |
+| **0.5** | **0.86** | **0.91** | **0.89** ← default |
+| 0.7 | 0.91 | 0.85 | 0.88 |
+
+Per-kind at 0.5: person 1.00 P / 0.92 R · location 0.86 / 0.92 · org 0.73 / 0.89.
+
+Findings:
+- **0.5 is the sweet spot** (the server default): max F1, and recall is already
+  at peak — dropping to 0.3 only adds false positives, while 0.7 sacrifices
+  recall (a missed entity is a leak).
+- **person** is strongest; **org** is weakest — false positives on ambiguous
+  surfaces (e.g. "Apple", "Amazon").
+- Even at the best setting, recall is ~0.91 — i.e. ~9% of entities slip. This is
+  *why* veil keeps secret-tier content local regardless and uses regex for the
+  deterministic kinds: the learned detector is a strong layer, not a guarantee.
+- The **edge** variant (`gliner-pii-edge-v1.0`) is a different token-level
+  architecture; evaluating it needs its own invocation (not done here).
+
 ## Wire it into veil
 
 ```rust
