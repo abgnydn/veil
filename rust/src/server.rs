@@ -29,6 +29,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::audit::{AuditFinding, AuditReason};
+use crate::bitnet::AnyDetector;
 use crate::entities::{EntityKind, RegexDetector};
 use crate::pipeline::{Replacement, VeilPipeline};
 
@@ -99,14 +100,21 @@ pub struct WireSpan {
 
 impl From<Replacement> for WireSpan {
     fn from(r: Replacement) -> Self {
+        // Source by construction: `RegexDetector` only emits the structural
+        // kinds; person/location/org can only come from the learned NER
+        // detector (regex has no pattern for names). So kind → source is exact.
+        let source = match r.kind {
+            EntityKind::Person | EntityKind::Location | EntityKind::Org => WireSource::Ner,
+            _ => WireSource::Regex,
+        };
         Self {
             start: r.start,
             end: r.end,
             kind: r.kind.into(),
-            // RegexDetector has no probabilistic score; deterministic = 1.0.
+            // No probabilistic score is plumbed through yet; deterministic = 1.0.
             score: 1.0,
             replacement: r.pseudonym,
-            source: WireSource::Regex,
+            source,
         }
     }
 }
@@ -197,27 +205,49 @@ pub struct ReverseMapJsonRes {
 // ---- Session store ---------------------------------------------------------
 
 struct Session {
-    pipeline: VeilPipeline<RegexDetector>,
+    pipeline: VeilPipeline<AnyDetector>,
     last_used_ms: u64,
 }
 
 /// In-memory map of `session_id` → pipeline. One pipeline per conversation so
 /// pseudonym numbering stays stable within a session and isolated across them.
-#[derive(Default)]
+///
+/// `detector` is the template cloned into each new session's pipeline — regex
+/// by default, or regex unioned with a learned NER detector (GLiNER via
+/// `HttpNerDetector`, set by the binary from `VEIL_DETECTOR_URL`). One config
+/// for the whole server; each session still gets its own session table.
 pub struct SessionStore {
     sessions: HashMap<String, Session>,
+    detector: AnyDetector,
+}
+
+impl Default for SessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SessionStore {
+    /// Store backed by the regex-only detector (no learned NER).
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self::with_detector(AnyDetector::Regex(RegexDetector::new()))
+    }
+
+    /// Store backed by a specific detector template, cloned per session.
+    #[must_use]
+    pub fn with_detector(detector: AnyDetector) -> Self {
+        Self {
+            sessions: HashMap::new(),
+            detector,
+        }
     }
 
     /// Get-or-create the pipeline for `id`, stamping its last-used time.
-    fn touch(&mut self, id: &str, now_ms: u64) -> &mut VeilPipeline<RegexDetector> {
+    fn touch(&mut self, id: &str, now_ms: u64) -> &mut VeilPipeline<AnyDetector> {
+        let detector = self.detector.clone();
         let entry = self.sessions.entry(id.to_string()).or_insert_with(|| Session {
-            pipeline: VeilPipeline::with_default_regex(),
+            pipeline: VeilPipeline::new(detector),
             last_used_ms: now_ms,
         });
         entry.last_used_ms = now_ms;
@@ -399,6 +429,41 @@ mod tests {
         assert!(!s.remove("old"));
     }
 
+    /// Spawn a stub learned-NER `/detect` server that flags "Alice" (bytes
+    /// 0..5) as a PERSON regardless of input — the kind regex can never find.
+    async fn spawn_detect_stub() -> String {
+        let app = Router::new().route(
+            "/detect",
+            post(|| async {
+                Json(serde_json::json!({
+                    "entities": [{ "kind": "PERSON", "start": 0, "end": 5 }]
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn session_store_uses_configured_learned_detector() {
+        // With a learned detector wired in (MergeFallback over regex), the
+        // store must surface BOTH the learned PERSON and the regex EMAIL —
+        // proving the detector template reaches each session's pipeline.
+        use crate::{HttpNerDetector, MergeFallback, RegexDetector};
+        let detect_url = spawn_detect_stub().await;
+        let detector = AnyDetector::BitnetMergeRegex(MergeFallback::new(
+            HttpNerDetector::new(detect_url),
+            RegexDetector::new(),
+        ));
+        let mut store = SessionStore::with_detector(detector);
+        let out = store.touch("s", 0).pseudonymize("Alice emails a@b.com");
+        assert_eq!(out, "PERSON_1 emails EMAIL_1");
+    }
+
     #[test]
     fn canonical_kind_serializes_snake_case() {
         assert_eq!(
@@ -413,6 +478,25 @@ mod tests {
             serde_json::to_string(&CanonicalKind::NationalId).unwrap(),
             "\"national_id\""
         );
+    }
+
+    #[test]
+    fn wire_span_source_reflects_detector_by_kind() {
+        use crate::Replacement;
+        let person = WireSpan::from(Replacement {
+            start: 0,
+            end: 5,
+            kind: EntityKind::Person,
+            pseudonym: "PERSON_1".to_string(),
+        });
+        assert!(matches!(person.source, WireSource::Ner), "person → ner");
+        let email = WireSpan::from(Replacement {
+            start: 0,
+            end: 7,
+            kind: EntityKind::Email,
+            pseudonym: "EMAIL_1".to_string(),
+        });
+        assert!(matches!(email.source, WireSource::Regex), "email → regex");
     }
 
     #[test]

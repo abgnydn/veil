@@ -64,3 +64,15 @@ cd ../../rust && cargo run -q --example smoke_gliner
 ```
 
 If the server is down, `MergeFallback` degrades to regex-only — never a crash.
+
+### Or point the engine server at it (no Rust code)
+
+`veil_server` wires this in automatically when `VEIL_DETECTOR_URL` is set, so
+the whole stack — including the MCP server — gets `person`/`location`/`org`:
+
+```bash
+GLINER_STUB=1 python3 server.py &                       # detector :8808
+cd ../../rust
+VEIL_DETECTOR_URL=http://127.0.0.1:8808 cargo run --bin veil_server
+# now /v1/pseudonymize returns PERSON/LOCATION/ORG spans (source: "ner")
+```

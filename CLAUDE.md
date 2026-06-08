@@ -64,9 +64,15 @@ would re-implement the entire tested Rust engine in TypeScript.
    modes); verified end-to-end (`cargo run --example smoke_gliner` against the
    stub: Alice→PERSON_1, bob@acme.com→EMAIL_1, Bangkok→LOCATION_1, Acme→ORG_1,
    merged + round-tripped; non-ASCII byte offsets verified on Turkish).
+   Also wired into the running server: `veil_server` builds a regex+learned
+   `MergeFallback` when `VEIL_DETECTOR_URL` is set, so the full chain
+   (MCP → VeilEnforcer → RustPipelineClient → engine → GLiNER) flows
+   `person`/`location`/`org` end-to-end — no TS change needed, the shell already
+   calls the engine. Wire `source` is reported accurately (regex vs ner by
+   kind). Verified live (veil_server + GLiNER stub: Alice→PERSON_1/ner,
+   bob@acme.com→EMAIL_1/regex, Bangkok→LOCATION_1/ner, round-tripped).
    **Remaining:** run the real GLiNER model (downloads ~1GB — deferred per
-   memory budget) and tune thresholds; wire `HttpNerDetector` into the TS-side
-   enforcer path so `person`/`location`/`org` flow through MCP.
+   memory budget) and tune thresholds.
 
 **Acceptance for this Resume — ALL MET (2026-06-08):**
 - ✅ One canonical path decided and documented at the top of this file (2026-06-05).

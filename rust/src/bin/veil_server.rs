@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 use veil::server::{build_router, now_ms, SessionStore};
+use veil::{AnyDetector, HttpNerDetector, MergeFallback, RegexDetector};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,7 +38,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
-    let state: Arc<Mutex<SessionStore>> = Arc::new(Mutex::new(SessionStore::new()));
+    // Detector: regex-only by default. When VEIL_DETECTOR_URL points at a
+    // learned-NER server (GLiNER — see examples/gliner-detector/), union it
+    // with regex via MergeFallback so the freeform PERSON/LOCATION/ORG kinds
+    // are caught too. If that server is down, MergeFallback degrades to regex.
+    let detector = match std::env::var("VEIL_DETECTOR_URL") {
+        Ok(url) if !url.is_empty() => {
+            eprintln!("veil_server: learned detector at {url} (regex + GLiNER)");
+            AnyDetector::BitnetMergeRegex(MergeFallback::new(
+                HttpNerDetector::new(url),
+                RegexDetector::new(),
+            ))
+        }
+        _ => {
+            eprintln!("veil_server: regex-only detector (set VEIL_DETECTOR_URL for learned NER)");
+            AnyDetector::Regex(RegexDetector::new())
+        }
+    };
+    let state: Arc<Mutex<SessionStore>> = Arc::new(Mutex::new(SessionStore::with_detector(detector)));
 
     // Idle reaper: the safety net for clients that forget to DELETE. Explicit
     // DELETE /v1/session/{id} is the primary cleanup path.
