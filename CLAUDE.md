@@ -69,10 +69,15 @@ would re-implement the entire tested Rust engine in TypeScript.
    (MCP → VeilEnforcer → RustPipelineClient → engine → GLiNER) flows
    `person`/`location`/`org` end-to-end — no TS change needed, the shell already
    calls the engine. Wire `source` is reported accurately (regex vs ner by
-   kind). Verified live (veil_server + GLiNER stub: Alice→PERSON_1/ner,
-   bob@acme.com→EMAIL_1/regex, Bangkok→LOCATION_1/ner, round-tripped).
-   **Remaining:** run the real GLiNER model (downloads ~1GB — deferred per
-   memory budget) and tune thresholds.
+   kind). Verified live with the **real** `knowledgator/gliner-pii-base-v1.0`
+   model (2026-06-08): through veil_server, "Alice Johnson"→PERSON_1, "Acme
+   Corp"→ORG_1, "Bangkok"→LOCATION_1, email via regex, reverse-mapped exactly;
+   Turkish "Ayşe Yılmaz"/"İstanbul" with byte offsets correct through the
+   multibyte chars. Peak RSS ~1.9 GB, load ~48s cold / ~15s warm. Verified
+   combo: python 3.12, gliner 0.2.26, torch 2.12.0, transformers 5.1.0 (in
+   `examples/gliner-detector/.venv`, gitignored). **Phase 1 is functionally
+   complete.** Remaining is tuning only: a threshold sweep + accuracy pass on a
+   labeled PII set, and whether to ship a smaller edge variant.
 
 **Acceptance for this Resume — ALL MET (2026-06-08):**
 - ✅ One canonical path decided and documented at the top of this file (2026-06-05).

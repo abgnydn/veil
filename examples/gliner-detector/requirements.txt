@@ -1,2 +1,4 @@
 # Real-model mode only. Stub mode (GLINER_STUB=1) needs nothing beyond stdlib.
+# Verified working combo (python 3.12): gliner 0.2.26, torch 2.12.0,
+# transformers 5.1.0. Peak RSS ~1.9 GB with knowledgator/gliner-pii-base-v1.0.
 gliner>=0.2.13
