@@ -8,5 +8,4 @@ export default defineConfig({
   treeshake: true,
   sourcemap: true,
   target: 'es2022',
-  external: ['jspdf'],
 });
