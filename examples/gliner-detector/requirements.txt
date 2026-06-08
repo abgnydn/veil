@@ -1,0 +1,2 @@
+# Real-model mode only. Stub mode (GLINER_STUB=1) needs nothing beyond stdlib.
+gliner>=0.2.13

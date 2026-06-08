@@ -1,0 +1,21 @@
+{
+  "name": "veil-mcp-server",
+  "version": "0.1.0",
+  "description": "Example MCP server enforcing veil tier algebra on every prompt.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^6.0.0"
+  }
+}
