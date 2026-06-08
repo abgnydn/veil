@@ -122,6 +122,56 @@ describe("VeilEnforcer — tier routing + hard invariants", () => {
     expect(remoteSink.seen[0]?.[0]?.content).not.toContain("alice@acme.com");
   });
 
+  test("private with cohortK>1: k indistinguishable prompts on the wire, real reverse-mapped", async () => {
+    // Cohort-aware fake engine: real prompt gets EMAIL_1, siblings get
+    // pool-disjoint EMAIL_1000x; reverse-map restores EMAIL_1.
+    const cohortEngine = (() => {
+      const fetchImpl = (async (url: string, init: RequestInit = {}) => {
+        const path = url.replace(/^.*\/v1/, "/v1");
+        const req = JSON.parse((init.body as string) ?? "{}");
+        if (path === "/v1/cohort") {
+          const real = req.text.split("alice@acme.com").join("EMAIL_1");
+          const cohort = [real];
+          for (let i = 1; i < req.k; i++) cohort.push(real.split("EMAIL_1").join(`EMAIL_${10000 + i}`));
+          return Response.json({ cohort, real_index: 0, requested_k: req.k, achieved_k: cohort.length });
+        }
+        if (path === "/v1/reverse-map") {
+          return Response.json({ text: req.text.split("EMAIL_1").join("alice@acme.com") });
+        }
+        throw new Error(`unexpected ${path}`);
+      }) as unknown as typeof fetch;
+      return new RustPipelineClient({ fetchImpl });
+    })();
+
+    const remoteSink = { seen: [] as Msg[][] };
+    const enforcer = new VeilEnforcer({
+      engine: cohortEngine,
+      sessionId: "s",
+      remote: recordingBackend("anthropic", false, remoteSink),
+      classify: fixedTier("private"),
+      cohortK: 4,
+    });
+
+    const res = (await enforcer.enforce("remind alice@acme.com")) as Dispatched;
+    expect(res.transformed).toBe(true);
+    expect(res.backendId).toBe("cohort(anthropic)");
+    expect(res.cohort).toEqual({ requestedK: 4, achievedK: 4 });
+
+    // 4 prompts were dispatched (fan-out happened during enforce()).
+    expect(remoteSink.seen).toHaveLength(4);
+    const dispatched = remoteSink.seen.map((m) => m[0]?.content ?? "");
+    // None carry raw PII; all are the same kind-shape "remind EMAIL_x".
+    for (const p of dispatched) {
+      expect(p).not.toContain("alice@acme.com");
+      expect(p).toMatch(/^remind EMAIL_\d+$/);
+    }
+    // The k prompts are distinct → log2(k) entropy, not collapsed.
+    expect(new Set(dispatched).size).toBe(4);
+
+    // The caller still gets the real response, reverse-mapped.
+    expect(await collectText(res.stream)).toBe("reply: remind alice@acme.com");
+  });
+
   test("secret WITH a local backend: stays on-device, never withheld", async () => {
     const localSink = { seen: [] as Msg[][] };
     const remoteSink = { seen: [] as Msg[][] };

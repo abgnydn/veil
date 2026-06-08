@@ -48,11 +48,16 @@ function buildEnforcer(): VeilEnforcer {
     skipHealthCheck: true,
   });
 
+  // VEIL_COHORT_K > 1 enables k-anonymous fan-out for private content (costs
+  // k× provider calls). Unset → pseudonymize-only.
+  const cohortK = Number.parseInt(process.env.VEIL_COHORT_K ?? "1", 10);
+
   return new VeilEnforcer({
     engine,
     sessionId: process.env.VEIL_SESSION_ID ?? "mcp-default",
     remote,
     local,
+    cohortK: Number.isFinite(cohortK) && cohortK > 1 ? cohortK : undefined,
   });
 }
 

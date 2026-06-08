@@ -63,6 +63,7 @@ export {
   type WireFinding,
   type PseudonymizeResult,
   type PseudonymizeJsonResult,
+  type CohortResult,
 } from "./rust-client";
 
 // Veil wrapper — runs the pseudonymization round-trip around any backend's chat

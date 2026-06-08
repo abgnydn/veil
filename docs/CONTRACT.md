@@ -256,3 +256,40 @@ a down detector degrades to regex-only via `MergeFallback`, never a crash. Each
 returned span is validated: unknown `kind`, out-of-bounds, or non-char-boundary
 spans are dropped, and the span text is **re-extracted from the input** so a
 buggy/hostile server cannot inject content by claiming a span.
+
+---
+
+## 9. Cohort endpoint (k-anonymity)
+
+For `private` content bound for a remote model, pseudonymization hides the
+*values* but the prompt still reveals there is one real user. The cohort
+endpoint adds **prompt-space k-anonymity** (VEIL.md §4): it returns `k`
+kind-shape-identical prompts — the real one plus `k-1` siblings whose
+pseudonyms are drawn from a pool disjoint from the session — so a wire-side
+adversary picks the real one with probability `1/k` (entropy `log2(k)`).
+
+```
+POST /v1/cohort  { "session_id": "...", "text": "...", "k": 8 }
+              -> { "cohort": ["...", "..."], "real_index": 0,
+                   "requested_k": 8, "achieved_k": 8 }
+```
+
+- `cohort[real_index]` carries the **session** pseudonyms (`EMAIL_1`); siblings
+  carry **pool** pseudonyms (`EMAIL_10001`, …). All k are the same template
+  with the same entity kinds in the same positions.
+- The caller (TS `VeilEnforcer`) **shuffles** the cohort for positional
+  unlinkability, fans out all k to the provider with **identical options**
+  (side-channel symmetry), keeps `real_index`'s response, drops the rest, and
+  reverse-maps the kept response. Sibling pool pseudonyms were never minted, so
+  reverse-map leaves them untouched — dropping siblings leaks nothing.
+- **Fail-open:** `k≤1`, an exhausted pool, or a pool↔session collision degrades
+  `achieved_k` toward 1 (pseudonymize-only) rather than blocking the turn. The
+  real prompt always ships.
+- **Cost:** k× provider calls. **Batch only** — streaming-with-cohort is future
+  work. Backed by Rust `StaticPoolSynthesizer` + `substitute_pseudonyms`.
+
+**Residual caveats (VEIL.md §4.3, not yet closed):** the pool uses a reserved
+numeric range (`*_10001+`), so an adversary who knows the scheme can still
+partition real vs sibling by number; and synthesis is deterministic across
+turns. Per-session pool randomization is the fix, deferred. Positional
+fingerprinting *is* closed (the caller shuffles).

@@ -71,6 +71,18 @@ export interface PseudonymizeJsonResult {
   spans: WireSpan[];
 }
 
+/** k-anonymity cohort: k kind-shape-identical prompts, one real, k-1 siblings. */
+export interface CohortResult {
+  /** The k prompts. `cohort[realIndex]` carries the real session pseudonyms. */
+  cohort: string[];
+  /** Which prompt is real (0 from the engine; the caller may shuffle). */
+  realIndex: number;
+  /** Cohort size requested. */
+  requestedK: number;
+  /** Cohort size achieved (≤ requested; ≥ 1). Entropy is log2(achievedK) bits. */
+  achievedK: number;
+}
+
 // ---- Client ----------------------------------------------------------------
 
 export interface RustPipelineClientOpts {
@@ -166,6 +178,24 @@ export class RustPipelineClient {
       value,
     });
     return res.findings;
+  }
+
+  /** Build a k-anonymous cohort for `text`: k kind-shape-identical prompts
+   *  (real + k-1 pool-disjoint siblings). The caller fans out all k, keeps the
+   *  real one's response, drops the rest. See docs/CONTRACT.md §9. */
+  async cohort(sessionId: string, text: string, k: number): Promise<CohortResult> {
+    const res = await this.post<{
+      cohort: string[];
+      real_index: number;
+      requested_k: number;
+      achieved_k: number;
+    }>("/v1/cohort", { session_id: sessionId, text, k });
+    return {
+      cohort: res.cohort,
+      realIndex: res.real_index,
+      requestedK: res.requested_k,
+      achievedK: res.achieved_k,
+    };
   }
 
   /** Drop a session's table (and its ability to reverse-map). Call on end. */

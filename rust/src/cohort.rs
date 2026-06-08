@@ -353,11 +353,16 @@ pub fn substitute_pseudonyms(
     .into_owned()
 }
 
-/// Compile the canonical pseudonym pattern. Kept in sync with
-/// `VeilPipeline::pseudonym_pattern` — the same grammar both mints and
-/// recognizes pseudonyms everywhere in the crate.
+/// Compile the canonical pseudonym pattern. Single-sourced from
+/// `EntityKind::ALL` — same grammar the pipeline mints with, so adding a kind
+/// updates mint, reverse-map, audit, and cohort together.
 fn pseudonym_pattern() -> Regex {
-    Regex::new(r"\b(EMAIL|PATH|IP|URL|UUID|PERSON)_\d+\b").expect("pseudonym pattern must compile")
+    let alternation = EntityKind::ALL
+        .iter()
+        .map(|k| k.as_prefix())
+        .collect::<Vec<_>>()
+        .join("|");
+    Regex::new(&format!(r"\b({alternation})_\d+\b")).expect("pseudonym pattern must compile")
 }
 
 /// What the dispatcher should do when a sibling fan-out request fails
@@ -413,14 +418,9 @@ impl CohortPolicy {
 
 fn build_default_pool() -> HashMap<EntityKind, Vec<String>> {
     let mut pool = HashMap::new();
-    for kind in [
-        EntityKind::Email,
-        EntityKind::Path,
-        EntityKind::Ip,
-        EntityKind::Url,
-        EntityKind::Uuid,
-        EntityKind::Person,
-    ] {
+    // Single-sourced from EntityKind::ALL so a new kind gets a pool without a
+    // second edit — else it surfaces at runtime as CohortError::KindUnsupported.
+    for kind in EntityKind::ALL {
         let mut entries = Vec::with_capacity(POOL_SIZE_PER_KIND);
         for i in 0..POOL_SIZE_PER_KIND {
             entries.push(format!("{}_{}", kind.as_prefix(), POOL_NUMERIC_FLOOR + i));
@@ -755,14 +755,7 @@ mod tests {
         // forgetting to extend the pool — would otherwise surface only
         // at runtime as `CohortError::KindUnsupported`.
         let pool = build_default_pool();
-        for kind in [
-            EntityKind::Email,
-            EntityKind::Path,
-            EntityKind::Ip,
-            EntityKind::Url,
-            EntityKind::Uuid,
-            EntityKind::Person,
-        ] {
+        for kind in EntityKind::ALL {
             let entries = pool
                 .get(&kind)
                 .unwrap_or_else(|| panic!("default pool must cover {kind:?}"));

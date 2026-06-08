@@ -85,6 +85,16 @@ would re-implement the entire tested Rust engine in TypeScript.
    deferred. Remaining: a real labeled-corpus benchmark (this set is small/
    synthetic) if a published number is ever needed.
 
+8. ✅ **Cohort blending (k-anonymity) shipped** (2026-06-08) — the last big
+   feature gap. Engine `/v1/cohort` (Rust `StaticPoolSynthesizer` +
+   `substitute_pseudonyms`, single-sourced pool now covers Location/Org);
+   `VeilEnforcer.cohortK>1` fans out k shuffled, side-channel-symmetric prompts,
+   keeps the real response, reverse-maps it; MCP example reads `VEIL_COHORT_K`.
+   Verified live: k=4 → 4 kind-shape-identical prompts, distinct pseudonym sets,
+   real reverse-maps / siblings don't. **Residual §4.3 caveats open**
+   (pool-range fingerprint, deterministic synthesis → per-session pool
+   randomization, deferred 2026-09-01). Off by default (k× provider cost).
+
 **Acceptance for this Resume — ALL MET (2026-06-08):**
 - ✅ One canonical path decided and documented at the top of this file (2026-06-05).
 - ✅ Shared contract landed (`docs/CONTRACT.md` + JSON schema); both vocabularies reconciled (2026-06-05).

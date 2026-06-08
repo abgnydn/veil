@@ -94,6 +94,27 @@ describe("RustPipelineClient — wire transport", () => {
     expect(findings[0]?.reason.type).toBe("unknown_pseudonym");
   });
 
+  test("cohort sends {session_id,text,k} and maps snake_case → camelCase", async () => {
+    const { fetchImpl, calls } = mockFetch(() => ({
+      body: {
+        cohort: ["remind EMAIL_1", "remind EMAIL_10001"],
+        real_index: 0,
+        requested_k: 2,
+        achieved_k: 2,
+      },
+    }));
+    const client = new RustPipelineClient({ fetchImpl });
+    const res = await client.cohort("s", "remind alice@acme.com", 2);
+    expect(res.cohort).toHaveLength(2);
+    expect(res.realIndex).toBe(0);
+    expect(res.achievedK).toBe(2);
+    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({
+      session_id: "s",
+      text: "remind alice@acme.com",
+      k: 2,
+    });
+  });
+
   test("health is true on 2xx and false (never throws) on failure", async () => {
     const up = new RustPipelineClient({
       fetchImpl: (async () => new Response("", { status: 200 })) as unknown as typeof fetch,

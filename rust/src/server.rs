@@ -30,6 +30,9 @@ use tokio::sync::Mutex;
 
 use crate::audit::{AuditFinding, AuditReason};
 use crate::bitnet::AnyDetector;
+use crate::cohort::{
+    substitute_pseudonyms, CohortSynthesizer, PromptEntities, StaticPoolSynthesizer,
+};
 use crate::entities::{EntityKind, RegexDetector};
 use crate::pipeline::{Replacement, VeilPipeline};
 
@@ -175,6 +178,14 @@ pub struct JsonReq {
     pub value: Value,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CohortReq {
+    pub session_id: String,
+    pub text: String,
+    /// Cohort size. k<=1 is a no-op (returns the real prompt only).
+    pub k: usize,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PseudonymizeRes {
     pub text: String,
@@ -200,6 +211,23 @@ pub struct PseudonymizeJsonRes {
 #[derive(Debug, Serialize)]
 pub struct ReverseMapJsonRes {
     pub value: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CohortRes {
+    /// k kind-shape-identical prompts: `cohort[real_index]` carries the real
+    /// session pseudonyms; the rest are pool-disjoint siblings. The caller fans
+    /// out all k, keeps `cohort[real_index]`'s response, drops the rest.
+    pub cohort: Vec<String>,
+    /// Index of the real prompt within `cohort` (0 in v1 — the caller may
+    /// shuffle for positional unlinkability, see docs/CONTRACT.md §9).
+    pub real_index: usize,
+    /// Cohort size the caller asked for.
+    pub requested_k: usize,
+    /// Cohort size actually produced. Falls below `requested_k` (down to 1)
+    /// when the synthesizer can't build enough disjoint siblings — fail-open,
+    /// so the real prompt always ships. log2(achieved_k) bits of entropy.
+    pub achieved_k: usize,
 }
 
 // ---- Session store ---------------------------------------------------------
@@ -366,6 +394,43 @@ async fn audit_json(State(state): State<AppState>, Json(req): Json<JsonReq>) -> 
     })
 }
 
+async fn cohort(State(state): State<AppState>, Json(req): Json<CohortReq>) -> Json<CohortRes> {
+    let mut store = state.lock().await;
+    let pipe = store.touch(&req.session_id, now_ms());
+
+    // 1. Pseudonymize the real prompt (mints into the session table).
+    let (real_text, _spans) = pipe.pseudonymize_with_spans(&req.text);
+
+    // 2. Extract its pseudonym set, in first-seen order.
+    let real_entities = PromptEntities::from_sanitized_text(&real_text);
+
+    // 3. Synthesize k-1 pool-disjoint siblings. Fail-open: any synth error
+    //    (pool exhausted/unsupported, or a pool↔session collision) degrades to
+    //    the real prompt only rather than blocking the turn.
+    let synth = StaticPoolSynthesizer::with_default_pool();
+    let siblings = if req.k <= 1 || synth.assert_disjoint_from_session(pipe.table()).is_err() {
+        Vec::new()
+    } else {
+        synth.synthesize(&real_entities, req.k).unwrap_or_default()
+    };
+
+    // 4. Build the cohort: real first, then each sibling with its pseudonyms
+    //    substituted in. real_index = 0 (the caller may shuffle).
+    let mut cohort = Vec::with_capacity(siblings.len() + 1);
+    cohort.push(real_text.clone());
+    for sib in &siblings {
+        cohort.push(substitute_pseudonyms(&real_text, &real_entities, sib));
+    }
+
+    let achieved_k = cohort.len();
+    Json(CohortRes {
+        cohort,
+        real_index: 0,
+        requested_k: req.k,
+        achieved_k,
+    })
+}
+
 async fn delete_session(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
@@ -385,6 +450,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/pseudonymize-json", post(pseudonymize_json))
         .route("/v1/reverse-map-json", post(reverse_map_json))
         .route("/v1/audit-json", post(audit_json))
+        .route("/v1/cohort", post(cohort))
         .route("/v1/session/{session_id}", delete(delete_session))
         .with_state(state)
 }
@@ -587,6 +653,64 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res["text"], "sent to EMAIL_1");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn http_cohort_produces_k_indistinguishable_prompts() {
+        let base = spawn_server().await;
+        let client = reqwest::Client::new();
+
+        let res: Value = client
+            .post(format!("{base}/v1/cohort"))
+            .json(&serde_json::json!({
+                "session_id": "c1",
+                "text": "remind alice@acme.com about /Users/baris/notes.md",
+                "k": 4
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        let cohort = res["cohort"].as_array().unwrap();
+        assert_eq!(res["achieved_k"], 4);
+        assert_eq!(cohort.len(), 4);
+        // Real prompt (index 0) carries the session pseudonyms.
+        assert_eq!(cohort[0], "remind EMAIL_1 about PATH_1");
+        // Every prompt is kind-shape identical: "remind EMAIL_x about PATH_y".
+        let re = regex::Regex::new(r"^remind EMAIL_\d+ about PATH_\d+$").unwrap();
+        for p in cohort {
+            assert!(re.is_match(p.as_str().unwrap()), "shape mismatch: {p}");
+        }
+        // The k pseudonym sets must be distinct — else entropy < log2(k).
+        let emails: std::collections::HashSet<_> = cohort
+            .iter()
+            .map(|p| p.as_str().unwrap().split(' ').nth(1).unwrap())
+            .collect();
+        assert_eq!(emails.len(), 4, "cohort EMAIL slots must be distinct");
+
+        // The real prompt reverse-maps; a sibling's pool pseudonym does not
+        // (never minted) — so dropping siblings leaks nothing.
+        let real: Value = client
+            .post(format!("{base}/v1/reverse-map"))
+            .json(&serde_json::json!({"session_id":"c1","text":"done EMAIL_1"}))
+            .send().await.unwrap().json().await.unwrap();
+        assert_eq!(real["text"], "done alice@acme.com");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn http_cohort_k1_is_real_only() {
+        let base = spawn_server().await;
+        let client = reqwest::Client::new();
+        let res: Value = client
+            .post(format!("{base}/v1/cohort"))
+            .json(&serde_json::json!({"session_id":"c2","text":"email a@b.com","k":1}))
+            .send().await.unwrap().json().await.unwrap();
+        assert_eq!(res["achieved_k"], 1);
+        assert_eq!(res["cohort"].as_array().unwrap().len(), 1);
+        assert_eq!(res["cohort"][0], "email EMAIL_1");
     }
 
     #[tokio::test(flavor = "multi_thread")]

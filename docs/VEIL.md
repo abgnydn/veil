@@ -507,19 +507,21 @@ recommendation above where they differ.
 | 1 | Anthropic fallback | **Ship it.** `AnthropicAdapter` is built; `VeilEnforcer` uses the remote for `public`/`internal` and for `private` *after* pseudonymization. The thesis is protected by invariant, not by omission: `secret` and raw `private` never reach it. | **Decided** — implemented. |
 | 2 | Default secret-tier backend | **Ollama (OpenAI-compat local), not Zero-TVM.** Zero-TVM is Phi-3-only, ~22% slower, and currently a stub (needs the vendored submodule). Ollama is what actually runs end-to-end in the enforcer today. Zero-TVM stays the opt-in *showcase* backend once vendored — a UX choice, not the secret-tier default. Honest divergence from Talos's pick. | **Decided** — reflects built wiring. |
 | 3 | Escalation threshold | **One global knob, default 0.2.** Implemented as `VeilEnforcer`/`routeMessage` `escalationMargin`. Per-tier asymmetry deferred until there are logs to set it from. | **Decided** — implemented. |
-| 4 | Default cohort K | **K=8 stands; cohort fan-out is NOT wired in v1.** The enforcer's `private` path pseudonymizes but does not yet fan out the k−1 siblings (the cohort blender is still a stub — see §4 and the limitation note below). Revisit when the PUPA harness (Phase 9) lands or by **2026-09-01**, whichever is first. | **Punted (dated).** |
+| 4 | Default cohort K | **K=8 stands; cohort fan-out is now WIRED** (2026-06-08). The engine exposes `/v1/cohort` (Rust `StaticPoolSynthesizer` + `substitute_pseudonyms`) and `VeilEnforcer` fans out k shuffled prompts when `cohortK>1`, keeping the real response. Off by default (`cohortK` unset → pseudonymize-only) since it costs k× provider calls. Residual §4.3 caveats (pool-range fingerprint, deterministic synthesis) still open — per-session pool randomization deferred to **2026-09-01**. | **Decided + shipped (v1).** |
 | 5 | PII vs ambiguous-PII | **Auto-pseudonymize the deterministic regex kinds; defer ambiguous NER kinds to Phase 1.** The Rust `RegexDetector` already auto-pseudonymizes `email/url/ip/path/uuid` (high precision). `person`/`location`/`org` need the learned detector (`BitnetDetector`, Phase 1, not yet built); until then they are **audit-log-only** (`AuditReason::LikelyLeaked`), matching the auditor's existing "watch the FP rate before escalating" stance. The LLM-disambiguation path (Talos's pick (c)) is reconsidered once Phase 1 exists. | **Decided (v1) / revisit with Phase 1.** |
 | 6 | Default browser NER model | **GLiNER (`gliner_multi_pii-v1`) for the browser fallback, spaCy fallback on init failure.** Low priority now: with the Rust engine canonical, `transformers-js` NER is only the no-server fallback, off the critical path. Revisit when the browser shell ships. | **Punted (dated)** — by **2026-09-01**. |
 | 7 | OPFS budget | **Warn >75%, refuse >90%, never silently delete.** A browser-shell concern only (WebLLM/Zero-TVM/transformers-js); the Rust-engine path doesn't touch OPFS. Decided in principle; enforced when the browser shell is built. | **Decided (principle)** — implement with browser shell. |
 
-### v1 limitation to surface (re: #4)
+### v1 status (re: #4) — cohort blending now shipped
 
 `VeilEnforcer` protects `private` content by **pseudonymization** (real entities
-→ `EMAIL_1`, reverse-mapped on return), which is shipped and tested. It does
-**not** yet apply **cohort blending** (the k-anonymous fan-out of §4). Until the
-cohort blender lands, do not describe v1 as providing the §4 k-anonymity
-guarantee — it provides pseudonymization only. This is a deliberate scope cut,
-not an oversight.
+→ `EMAIL_1`, reverse-mapped on return) by default, and by **cohort blending**
+(the k-anonymous fan-out of §4) when `cohortK>1`. Both are shipped and tested:
+the engine's `/v1/cohort` builds the k-prompt cohort and the enforcer shuffles +
+fans out, keeping the real response. The §4 k-anonymity guarantee holds at
+`log2(achieved_k)` bits — **with the §4.3 caveats still open** (pool-range
+fingerprint, deterministic synthesis; positional fingerprint is closed by the
+caller's shuffle). So: claim k-anonymity *with those caveats*, not unqualified.
 
 ---
 

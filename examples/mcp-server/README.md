@@ -43,6 +43,7 @@ Configuration (env):
 | `VEIL_LOCAL_URL` | `http://localhost:11434/v1` | local (Ollama) endpoint for secret tier |
 | `VEIL_LOCAL_MODEL` | `phi3.5:3.8b` | local model id |
 | `VEIL_SESSION_ID` | `mcp-default` | pseudonym session key |
+| `VEIL_COHORT_K` | `1` | k-anonymous fan-out for private content (>1 enables; costs k× provider calls) |
 
 Register in an MCP client (e.g. Claude Desktop `mcpServers`):
 
