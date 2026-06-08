@@ -15,13 +15,34 @@ pub enum EntityKind {
     Ip,
     Url,
     Uuid,
-    /// Personal name. Introduced in Phase 2: regex alone cannot reliably
-    /// find names, so this kind only reaches the session table via the
-    /// learned detector (`BitnetDetector`).
+    /// Personal name. Regex alone cannot reliably find names, so this kind
+    /// only reaches the session table via the learned detector
+    /// ([`crate::HttpNerDetector`], typically GLiNER).
     Person,
+    /// Place name (city, country, address). Learned-detector only — same
+    /// rationale as [`Self::Person`].
+    Location,
+    /// Organization / company name. Learned-detector only.
+    Org,
 }
 
 impl EntityKind {
+    /// Every kind this crate currently mints, in pseudonym-counter order.
+    /// Single source of truth for the reverse-map / audit scanner pattern
+    /// (`pipeline.rs` builds its alternation from these prefixes) so adding a
+    /// kind here is the only edit needed — no second regex to keep in sync.
+    /// See `docs/CONTRACT.md` §2 for the canonical kind↔prefix table.
+    pub const ALL: [EntityKind; 8] = [
+        Self::Email,
+        Self::Path,
+        Self::Ip,
+        Self::Url,
+        Self::Uuid,
+        Self::Person,
+        Self::Location,
+        Self::Org,
+    ];
+
     /// Upper-case prefix used in generated pseudonyms.
     #[must_use]
     pub const fn as_prefix(self) -> &'static str {
@@ -32,6 +53,8 @@ impl EntityKind {
             Self::Url => "URL",
             Self::Uuid => "UUID",
             Self::Person => "PERSON",
+            Self::Location => "LOCATION",
+            Self::Org => "ORG",
         }
     }
 
@@ -45,6 +68,8 @@ impl EntityKind {
             "URL" => Some(Self::Url),
             "UUID" => Some(Self::Uuid),
             "PERSON" => Some(Self::Person),
+            "LOCATION" => Some(Self::Location),
+            "ORG" => Some(Self::Org),
             _ => None,
         }
     }
@@ -215,14 +240,7 @@ mod tests {
 
     #[test]
     fn entity_kind_prefix_round_trip() {
-        for k in [
-            EntityKind::Email,
-            EntityKind::Path,
-            EntityKind::Ip,
-            EntityKind::Url,
-            EntityKind::Uuid,
-            EntityKind::Person,
-        ] {
+        for k in EntityKind::ALL {
             assert_eq!(EntityKind::from_prefix(k.as_prefix()), Some(k));
         }
         assert_eq!(EntityKind::from_prefix("UNKNOWN"), None);

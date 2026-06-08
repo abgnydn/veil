@@ -1,18 +1,27 @@
-//! HTTP-backed detector that delegates entity recognition to a local `BitNet`
-//! inference server. Phase 1 of the Ternary Veil roadmap — drops into the
-//! stable [`Detector`] boundary, with [`FallbackDetector`] providing a
-//! regex-stub safety net when the server is unreachable or returns garbage.
+//! HTTP-backed learned NER detector. Delegates entity recognition to a local
+//! inference server over a model-agnostic JSON protocol — the server may run
+//! **GLiNER** (the recommended default: zero-shot, multilingual, runs even
+//! in-browser via ONNX), a BitNet model, spaCy, or anything else that speaks
+//! the contract. Phase 1 of the roadmap; drops into the stable [`Detector`]
+//! boundary, with [`MergeFallback`] unioning it with the deterministic
+//! [`RegexDetector`] (regex for structured kinds, the learned model for the
+//! freeform kinds regex can't do: `PERSON`/`LOCATION`/`ORG`).
 //!
-//! Wire protocol (`POST {endpoint}/detect`):
+//! The canonical type is [`HttpNerDetector`]; [`BitnetDetector`] is a
+//! backward-compatible alias.
+//!
+//! Wire protocol (`POST {endpoint}/detect`) — see `docs/CONTRACT.md` §8:
 //! ```json
-//! // request
-//! { "text": "..." }
+//! // request — `labels` tells a zero-shot model (GLiNER) which kinds to find
+//! { "text": "...", "labels": ["PERSON", "LOCATION", "ORG"] }
 //! // response
-//! { "entities": [ { "kind": "EMAIL", "start": 0, "end": 5 }, ... ] }
+//! { "entities": [ { "kind": "PERSON", "start": 0, "end": 5 }, ... ] }
 //! ```
-//! `kind` must match an [`EntityKind::as_prefix`] value. `start`/`end` are
-//! byte offsets into the input; any entity whose span is out of bounds,
-//! not on char boundaries, or carrying an unknown `kind` is dropped.
+//! `kind` must match an [`EntityKind::as_prefix`] value (the uppercase
+//! canonical kind). `start`/`end` are UTF-8 byte offsets into the input; any
+//! entity whose span is out of bounds, not on char boundaries, or carrying an
+//! unknown `kind` is dropped. The detector re-extracts the span text from the
+//! input, so the server cannot lie about content while claiming valid offsets.
 
 use std::time::Duration;
 
@@ -24,21 +33,37 @@ use crate::entities::{DetectedEntity, Detector, EntityKind};
 /// not stall a turn if the server hangs — the fallback detector takes over.
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(1500);
 
-/// Detector that POSTs the input to a `BitNet` inference server's `/detect`
-/// endpoint and parses the returned spans.
+/// The freeform kinds a learned NER model is asked for by default — the ones
+/// [`RegexDetector`] structurally cannot find. Structured kinds (email, path,
+/// ip, url, uuid) stay on regex, which is deterministic and cheaper.
+const DEFAULT_NER_LABELS: &[EntityKind] =
+    &[EntityKind::Person, EntityKind::Location, EntityKind::Org];
+
+/// Detector that POSTs the input to a learned NER inference server's `/detect`
+/// endpoint and parses the returned spans. Backend-agnostic: GLiNER (default),
+/// BitNet, spaCy, etc.
 ///
 /// Errors (HTTP failure, timeout, malformed JSON, invalid spans) are
-/// swallowed to an empty result — pair with [`FallbackDetector`] to keep
+/// swallowed to an empty result — pair with [`MergeFallback`] to keep
 /// regex coverage when the server is down.
 #[derive(Debug, Clone)]
-pub struct BitnetDetector {
+pub struct HttpNerDetector {
     endpoint: String,
+    /// Kinds requested per call — sent as `labels` so a zero-shot model
+    /// (GLiNER) knows what to extract. A fixed-label server may ignore them.
+    labels: Vec<EntityKind>,
     http: reqwest::Client,
 }
 
-impl BitnetDetector {
-    /// Build a detector pointing at `endpoint` (e.g. `http://127.0.0.1:8080`).
-    /// The `/detect` path is appended at call time.
+/// Backward-compatible alias. The original name; the protocol was always
+/// model-agnostic, so [`HttpNerDetector`] is the honest name. New code should
+/// prefer it.
+pub type BitnetDetector = HttpNerDetector;
+
+impl HttpNerDetector {
+    /// Build a detector pointing at `endpoint` (e.g. `http://127.0.0.1:8808`),
+    /// requesting the default freeform NER kinds. The `/detect` path is
+    /// appended at call time.
     #[must_use]
     pub fn new(endpoint: impl Into<String>) -> Self {
         let http = reqwest::Client::builder()
@@ -47,6 +72,7 @@ impl BitnetDetector {
             .expect("reqwest client with rustls-tls must build");
         Self {
             endpoint: endpoint.into(),
+            labels: DEFAULT_NER_LABELS.to_vec(),
             http,
         }
     }
@@ -61,12 +87,23 @@ impl BitnetDetector {
         self
     }
 
+    /// Override which kinds to request (the zero-shot `labels`). Empty means
+    /// "send no labels" — leave it to a fixed-label server's configuration.
+    #[must_use]
+    pub fn with_labels(mut self, labels: Vec<EntityKind>) -> Self {
+        self.labels = labels;
+        self
+    }
+
     /// Private async body. Named `_impl` so the public async interface
     /// goes through the [`Detector`] trait's `detect_async` — keeps one
     /// canonical entry point for every caller.
     async fn detect_impl(&self, input: &str) -> Vec<DetectedEntity> {
         let url = format!("{}/detect", self.endpoint.trim_end_matches('/'));
-        let body = DetectRequest { text: input };
+        let body = DetectRequest {
+            text: input,
+            labels: self.labels.iter().map(|k| k.as_prefix()).collect(),
+        };
         let Ok(response) = self.http.post(&url).json(&body).send().await else {
             return Vec::new();
         };
@@ -80,7 +117,7 @@ impl BitnetDetector {
     }
 }
 
-impl Detector for BitnetDetector {
+impl Detector for HttpNerDetector {
     /// Must be called from within a multi-threaded tokio runtime — that is
     /// the caller contract for every veil pipeline that uses the sync
     /// path, since the surrounding `ProviderClient` is async. If called
@@ -248,6 +285,9 @@ impl Detector for AnyDetector {
 #[derive(Serialize)]
 struct DetectRequest<'a> {
     text: &'a str,
+    /// Zero-shot label hints (uppercase canonical kinds). A GLiNER server
+    /// extracts exactly these; a fixed-label server may ignore them.
+    labels: Vec<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -469,6 +509,28 @@ mod tests {
         let out = pipeline.pseudonymize("Alice writes code");
         assert_eq!(out, "EMAIL_1 writes code");
         assert_eq!(pipeline.reverse_map(&out), "Alice writes code");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn learned_detector_handles_person_location_org_kinds() {
+        // The Phase 1 / GLiNER value: the freeform kinds regex cannot do.
+        // A learned server returns PERSON + LOCATION + ORG; all three must
+        // pseudonymize with their own per-kind counters and round-trip.
+        let body = r#"{"entities":[
+            {"kind":"PERSON","start":0,"end":5},
+            {"kind":"LOCATION","start":15,"end":22},
+            {"kind":"ORG","start":28,"end":32}
+        ]}"#;
+        let server = spawn_server(http_ok(body)).await;
+        // Use the honest type name; default labels are the freeform NER kinds.
+        let detector = super::HttpNerDetector::new(server.base_url);
+        let mut pipeline = crate::VeilPipeline::new(detector);
+        let out = pipeline.pseudonymize("Alice lives in Bangkok near Acme HQ");
+        assert_eq!(out, "PERSON_1 lives in LOCATION_1 near ORG_1 HQ");
+        assert_eq!(
+            pipeline.reverse_map(&out),
+            "Alice lives in Bangkok near Acme HQ"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

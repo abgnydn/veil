@@ -1,0 +1,546 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//! Phase 7: the loopback HTTP seam.
+//!
+//! Wraps one [`VeilPipeline`] per `session_id` behind the wire contract in
+//! `docs/CONTRACT.md`. This is the component the TypeScript shell calls — the
+//! canonical engine exposed over HTTP. It is the one place that holds raw PII
+//! *and* the real↔pseudonym mapping, so it MUST stay bound to `127.0.0.1`
+//! (the binary enforces this default; see `bin/veil_server.rs`).
+//!
+//! Wire types here are the serde mirror of `docs/veil-wire.schema.json`:
+//! `CanonicalKind` serializes snake_case (`credit_card`), `WireAuditReason` is
+//! an internally-tagged union (`{ "type": "likely_leaked", "kind": ... }`).
+//! The internal [`EntityKind`]/[`AuditReason`] types map onto these at the
+//! boundary so the engine stays decoupled from the wire format.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{delete, get, post},
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::Mutex;
+
+use crate::audit::{AuditFinding, AuditReason};
+use crate::entities::{EntityKind, RegexDetector};
+use crate::pipeline::{Replacement, VeilPipeline};
+
+// ---- Wire vocabulary (mirror of docs/veil-wire.schema.json) ----------------
+
+/// Canonical entity kind on the wire. Serializes snake_case per the contract
+/// (`credit_card`, `crypto_address`, `national_id`, `api_key`). The crate's
+/// `RegexDetector` mints six of these today; the rest are reserved so the TS
+/// shell and a future learned detector share one vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CanonicalKind {
+    Email,
+    Url,
+    Ip,
+    Path,
+    Uuid,
+    Phone,
+    CreditCard,
+    Iban,
+    CryptoAddress,
+    ApiKey,
+    Ssn,
+    NationalId,
+    Dob,
+    Person,
+    Location,
+    Org,
+    Custom,
+}
+
+impl From<EntityKind> for CanonicalKind {
+    fn from(k: EntityKind) -> Self {
+        match k {
+            EntityKind::Email => Self::Email,
+            EntityKind::Path => Self::Path,
+            EntityKind::Ip => Self::Ip,
+            EntityKind::Url => Self::Url,
+            EntityKind::Uuid => Self::Uuid,
+            EntityKind::Person => Self::Person,
+            EntityKind::Location => Self::Location,
+            EntityKind::Org => Self::Org,
+        }
+    }
+}
+
+/// Which detector produced a span. Regex spans are deterministic; `ner`/`llm`
+/// are best-effort. The current server emits only `regex`.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireSource {
+    Regex,
+    Ner,
+    Llm,
+    Context,
+}
+
+/// A replaced span on the wire (`docs/CONTRACT.md` §5).
+#[derive(Debug, Clone, Serialize)]
+pub struct WireSpan {
+    pub start: usize,
+    pub end: usize,
+    pub kind: CanonicalKind,
+    pub score: f32,
+    pub replacement: String,
+    pub source: WireSource,
+}
+
+impl From<Replacement> for WireSpan {
+    fn from(r: Replacement) -> Self {
+        Self {
+            start: r.start,
+            end: r.end,
+            kind: r.kind.into(),
+            // RegexDetector has no probabilistic score; deterministic = 1.0.
+            score: 1.0,
+            replacement: r.pseudonym,
+            source: WireSource::Regex,
+        }
+    }
+}
+
+/// Internally-tagged audit reason: `{ "type": "...", "kind": "..." }`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WireAuditReason {
+    UnknownPseudonym { kind: CanonicalKind },
+    LikelyLeaked { kind: CanonicalKind },
+}
+
+/// An audit finding on the wire.
+#[derive(Debug, Clone, Serialize)]
+pub struct WireFinding {
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+    pub reason: WireAuditReason,
+}
+
+impl From<AuditFinding> for WireFinding {
+    fn from(f: AuditFinding) -> Self {
+        let reason = match f.reason {
+            AuditReason::UnknownPseudonym { kind } => {
+                WireAuditReason::UnknownPseudonym { kind: kind.into() }
+            }
+            AuditReason::LikelyLeaked { kind } => {
+                WireAuditReason::LikelyLeaked { kind: kind.into() }
+            }
+        };
+        Self {
+            start: f.start,
+            end: f.end,
+            text: f.text,
+            reason,
+        }
+    }
+}
+
+// ---- Request / response bodies ---------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct TextReq {
+    pub session_id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReplyReq {
+    pub session_id: String,
+    pub reply: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JsonReq {
+    pub session_id: String,
+    pub value: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PseudonymizeRes {
+    pub text: String,
+    pub spans: Vec<WireSpan>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReverseMapRes {
+    pub text: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditRes {
+    pub findings: Vec<WireFinding>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PseudonymizeJsonRes {
+    pub value: Value,
+    pub spans: Vec<WireSpan>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReverseMapJsonRes {
+    pub value: Value,
+}
+
+// ---- Session store ---------------------------------------------------------
+
+struct Session {
+    pipeline: VeilPipeline<RegexDetector>,
+    last_used_ms: u64,
+}
+
+/// In-memory map of `session_id` → pipeline. One pipeline per conversation so
+/// pseudonym numbering stays stable within a session and isolated across them.
+#[derive(Default)]
+pub struct SessionStore {
+    sessions: HashMap<String, Session>,
+}
+
+impl SessionStore {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get-or-create the pipeline for `id`, stamping its last-used time.
+    fn touch(&mut self, id: &str, now_ms: u64) -> &mut VeilPipeline<RegexDetector> {
+        let entry = self.sessions.entry(id.to_string()).or_insert_with(|| Session {
+            pipeline: VeilPipeline::with_default_regex(),
+            last_used_ms: now_ms,
+        });
+        entry.last_used_ms = now_ms;
+        &mut entry.pipeline
+    }
+
+    /// Drop a session (and its ability to reverse-map). Returns whether it existed.
+    pub fn remove(&mut self, id: &str) -> bool {
+        self.sessions.remove(id).is_some()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.sessions.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.sessions.is_empty()
+    }
+
+    /// Evict sessions idle for at least `ttl_ms` as of `now_ms`. Returns the
+    /// count evicted. `now_ms` is injected (not read from the clock) so this is
+    /// testable without sleeping. The binary's reaper calls this on a timer;
+    /// explicit `DELETE /v1/session/{id}` is the primary cleanup path.
+    pub fn evict_idle(&mut self, now_ms: u64, ttl_ms: u64) -> usize {
+        let before = self.sessions.len();
+        self.sessions
+            .retain(|_, s| now_ms.saturating_sub(s.last_used_ms) < ttl_ms);
+        before - self.sessions.len()
+    }
+}
+
+/// Shared, lock-guarded session store handed to every handler.
+pub type AppState = Arc<Mutex<SessionStore>>;
+
+/// Wall-clock milliseconds since the Unix epoch. Exposed so the binary's
+/// idle-reaper uses the same clock the handlers stamp with.
+#[must_use]
+pub fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+// ---- Handlers --------------------------------------------------------------
+
+async fn health() -> StatusCode {
+    StatusCode::OK
+}
+
+async fn pseudonymize(
+    State(state): State<AppState>,
+    Json(req): Json<TextReq>,
+) -> Json<PseudonymizeRes> {
+    let mut store = state.lock().await;
+    let pipe = store.touch(&req.session_id, now_ms());
+    let (text, spans) = pipe.pseudonymize_with_spans(&req.text);
+    Json(PseudonymizeRes {
+        text,
+        spans: spans.into_iter().map(WireSpan::from).collect(),
+    })
+}
+
+async fn reverse_map(
+    State(state): State<AppState>,
+    Json(req): Json<TextReq>,
+) -> Json<ReverseMapRes> {
+    let mut store = state.lock().await;
+    let pipe = store.touch(&req.session_id, now_ms());
+    Json(ReverseMapRes {
+        text: pipe.reverse_map(&req.text),
+    })
+}
+
+async fn audit(State(state): State<AppState>, Json(req): Json<ReplyReq>) -> Json<AuditRes> {
+    let mut store = state.lock().await;
+    let pipe = store.touch(&req.session_id, now_ms());
+    let findings = pipe.audit_reply_async(&req.reply).await;
+    Json(AuditRes {
+        findings: findings.into_iter().map(WireFinding::from).collect(),
+    })
+}
+
+async fn pseudonymize_json(
+    State(state): State<AppState>,
+    Json(req): Json<JsonReq>,
+) -> Json<PseudonymizeJsonRes> {
+    let mut store = state.lock().await;
+    let pipe = store.touch(&req.session_id, now_ms());
+    let mut value = req.value;
+    let spans = pipe.pseudonymize_json_in_place_collect(&mut value);
+    Json(PseudonymizeJsonRes {
+        value,
+        spans: spans.into_iter().map(WireSpan::from).collect(),
+    })
+}
+
+async fn reverse_map_json(
+    State(state): State<AppState>,
+    Json(req): Json<JsonReq>,
+) -> Json<ReverseMapJsonRes> {
+    let mut store = state.lock().await;
+    let pipe = store.touch(&req.session_id, now_ms());
+    let mut value = req.value;
+    pipe.reverse_map_json_in_place(&mut value);
+    Json(ReverseMapJsonRes { value })
+}
+
+async fn audit_json(State(state): State<AppState>, Json(req): Json<JsonReq>) -> Json<AuditRes> {
+    let mut store = state.lock().await;
+    let pipe = store.touch(&req.session_id, now_ms());
+    let findings = pipe.audit_json_async(&req.value).await;
+    Json(AuditRes {
+        findings: findings.into_iter().map(WireFinding::from).collect(),
+    })
+}
+
+async fn delete_session(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> StatusCode {
+    state.lock().await.remove(&session_id);
+    StatusCode::NO_CONTENT
+}
+
+/// Build the router for the wire contract. The caller owns the `AppState` so
+/// it (and tests) can inspect the store and run the idle reaper.
+pub fn build_router(state: AppState) -> Router {
+    Router::new()
+        .route("/v1/health", get(health))
+        .route("/v1/pseudonymize", post(pseudonymize))
+        .route("/v1/reverse-map", post(reverse_map))
+        .route("/v1/audit", post(audit))
+        .route("/v1/pseudonymize-json", post(pseudonymize_json))
+        .route("/v1/reverse-map-json", post(reverse_map_json))
+        .route("/v1/audit-json", post(audit_json))
+        .route("/v1/session/{session_id}", delete(delete_session))
+        .with_state(state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- pure unit tests (no HTTP) ----
+
+    #[test]
+    fn session_store_touch_creates_then_reuses() {
+        let mut s = SessionStore::new();
+        assert!(s.is_empty());
+        let _ = s.touch("a", 100).pseudonymize("mail a@b.com");
+        assert_eq!(s.len(), 1);
+        // Same id reuses the pipeline → stable pseudonym, no second mint.
+        let out = s.touch("a", 200).pseudonymize("again a@b.com");
+        assert_eq!(out, "again EMAIL_1");
+        assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn session_store_isolates_distinct_sessions() {
+        let mut s = SessionStore::new();
+        let a = s.touch("a", 0).pseudonymize("x@y.com");
+        let b = s.touch("b", 0).pseudonymize("p@q.com");
+        // Each session numbers from 1 — isolation.
+        assert_eq!(a, "EMAIL_1");
+        assert_eq!(b, "EMAIL_1");
+    }
+
+    #[test]
+    fn evict_idle_drops_only_stale_sessions() {
+        let mut s = SessionStore::new();
+        let _ = s.touch("old", 1_000);
+        let _ = s.touch("fresh", 5_000);
+        // now=6000, ttl=2000: old idle 5000 (>=2000) evicted; fresh idle 1000 kept.
+        let evicted = s.evict_idle(6_000, 2_000);
+        assert_eq!(evicted, 1);
+        assert!(s.remove("fresh"));
+        assert!(!s.remove("old"));
+    }
+
+    #[test]
+    fn canonical_kind_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&CanonicalKind::CreditCard).unwrap(),
+            "\"credit_card\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CanonicalKind::from(EntityKind::Ip)).unwrap(),
+            "\"ip\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CanonicalKind::NationalId).unwrap(),
+            "\"national_id\""
+        );
+    }
+
+    #[test]
+    fn wire_audit_reason_is_internally_tagged() {
+        let r = WireAuditReason::LikelyLeaked {
+            kind: CanonicalKind::Email,
+        };
+        assert_eq!(
+            serde_json::to_value(&r).unwrap(),
+            serde_json::json!({ "type": "likely_leaked", "kind": "email" })
+        );
+    }
+
+    // ---- HTTP integration (boots the server on an ephemeral loopback port) ----
+
+    async fn spawn_server() -> String {
+        let state = Arc::new(Mutex::new(SessionStore::new()));
+        let app = build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn http_text_round_trip_and_session_lifecycle() {
+        let base = spawn_server().await;
+        let client = reqwest::Client::new();
+
+        // pseudonymize → {text, spans}
+        let res: Value = client
+            .post(format!("{base}/v1/pseudonymize"))
+            .json(&serde_json::json!({"session_id":"s1","text":"email alice@acme.com please"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(res["text"], "email EMAIL_1 please");
+        assert_eq!(res["spans"][0]["kind"], "email");
+        assert_eq!(res["spans"][0]["replacement"], "EMAIL_1");
+        assert_eq!(res["spans"][0]["source"], "regex");
+
+        // reverse-map in the same session restores the real entity
+        let res: Value = client
+            .post(format!("{base}/v1/reverse-map"))
+            .json(&serde_json::json!({"session_id":"s1","text":"sent to EMAIL_1"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(res["text"], "sent to alice@acme.com");
+
+        // audit flags a raw leak in a reply
+        let res: Value = client
+            .post(format!("{base}/v1/audit"))
+            .json(&serde_json::json!({"session_id":"s1","reply":"I'll email leak@x.com now"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(res["findings"][0]["reason"]["type"], "likely_leaked");
+        assert_eq!(res["findings"][0]["text"], "leak@x.com");
+
+        // DELETE drops the session
+        let resp = client
+            .delete(format!("{base}/v1/session/s1"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 204);
+
+        // after delete, EMAIL_1 is unknown → passes through unchanged
+        let res: Value = client
+            .post(format!("{base}/v1/reverse-map"))
+            .json(&serde_json::json!({"session_id":"s1","text":"sent to EMAIL_1"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(res["text"], "sent to EMAIL_1");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn http_json_tool_call_round_trip() {
+        let base = spawn_server().await;
+        let client = reqwest::Client::new();
+
+        // pseudonymize a tool-call argument object
+        let res: Value = client
+            .post(format!("{base}/v1/pseudonymize-json"))
+            .json(&serde_json::json!({
+                "session_id":"j1",
+                "value": {"to":"alice@acme.com","body":"ship to /Users/baris/out"}
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(res["value"]["to"], "EMAIL_1");
+        assert_eq!(res["value"]["body"], "ship to PATH_1");
+        assert_eq!(res["spans"].as_array().unwrap().len(), 2);
+
+        // reverse-map-json restores both leaves in the same session
+        let res: Value = client
+            .post(format!("{base}/v1/reverse-map-json"))
+            .json(&serde_json::json!({
+                "session_id":"j1",
+                "value": {"to":"EMAIL_1","note":"path was PATH_1"}
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(res["value"]["to"], "alice@acme.com");
+        assert_eq!(res["value"]["note"], "path was /Users/baris/out");
+    }
+}

@@ -9,6 +9,21 @@ use crate::audit::{AuditFinding, AuditReason};
 use crate::entities::{Detector, EntityKind, RegexDetector};
 use crate::session_table::SessionTable;
 
+/// One entity replaced during pseudonymization: where it was in the input
+/// (UTF-8 byte offsets, per `docs/CONTRACT.md` §3) and the pseudonym it became.
+/// Returned by [`VeilPipeline::pseudonymize_with_spans`] so the HTTP seam can
+/// report `{ text, spans }` without re-running detection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replacement {
+    /// Byte offset (inclusive) of the original entity in the input.
+    pub start: usize,
+    /// Byte offset (exclusive) of the original entity in the input.
+    pub end: usize,
+    pub kind: EntityKind,
+    /// The minted-or-reused pseudonym, e.g. `EMAIL_1`.
+    pub pseudonym: String,
+}
+
 /// Guard against pathological nesting when walking tool-call JSON. Most
 /// real tool inputs are shallow (two or three levels); 32 leaves plenty of
 /// headroom without risk of stack-blowing on a crafted payload.
@@ -42,7 +57,16 @@ impl VeilPipeline<RegexDetector> {
 impl<D: Detector> VeilPipeline<D> {
     /// Build a pipeline around the given detector with an empty session table.
     pub fn new(detector: D) -> Self {
-        let pseudonym_pattern = Regex::new(r"\b(EMAIL|PATH|IP|URL|UUID|PERSON)_\d+\b")
+        // Single-sourced from `EntityKind::ALL` so a new kind needs no second
+        // edit here. Deliberately the *known* prefixes, not an open
+        // `[A-Z]+_\d+`: the audit scanner flags unknown pseudonyms, and an
+        // open pattern would mis-flag natural tokens like `ROOM_101`.
+        let alternation = EntityKind::ALL
+            .iter()
+            .map(|k| k.as_prefix())
+            .collect::<Vec<_>>()
+            .join("|");
+        let pseudonym_pattern = Regex::new(&format!(r"\b({alternation})_\d+\b"))
             .expect("pseudonym pattern must compile");
         Self {
             detector,
@@ -62,22 +86,37 @@ impl<D: Detector> VeilPipeline<D> {
     /// from the session table. Entities seen in a prior call reuse the
     /// same pseudonym.
     pub fn pseudonymize(&mut self, input: &str) -> String {
+        self.pseudonymize_with_spans(input).0
+    }
+
+    /// Like [`Self::pseudonymize`] but also returns the [`Replacement`] spans
+    /// it applied — what the HTTP `/v1/pseudonymize` endpoint reports as
+    /// `{ text, spans }` (see `docs/CONTRACT.md` §4.1). Span offsets are
+    /// UTF-8 byte offsets into `input`.
+    pub fn pseudonymize_with_spans(&mut self, input: &str) -> (String, Vec<Replacement>) {
         let detections = self.detector.detect(input);
         if detections.is_empty() {
-            return input.to_string();
+            return (input.to_string(), Vec::new());
         }
 
         // Detections are already sorted and non-overlapping.
         let mut out = String::with_capacity(input.len());
+        let mut spans = Vec::with_capacity(detections.len());
         let mut cursor = 0usize;
         for det in detections {
             out.push_str(&input[cursor..det.start]);
             let pseudo = self.table.pseudonymize(&det.text, det.kind);
+            spans.push(Replacement {
+                start: det.start,
+                end: det.end,
+                kind: det.kind,
+                pseudonym: pseudo.clone(),
+            });
             out.push_str(&pseudo);
             cursor = det.end;
         }
         out.push_str(&input[cursor..]);
-        out
+        (out, spans)
     }
 
     /// Walk `input`, replace any pseudonym (e.g. `EMAIL_1`) that this
@@ -175,6 +214,17 @@ impl<D: Detector> VeilPipeline<D> {
     /// are Anthropic wire-protocol identifiers, not user content.
     pub fn pseudonymize_json_in_place(&mut self, value: &mut Value) {
         pseudonymize_json_depth(value, self, MAX_JSON_DEPTH);
+    }
+
+    /// Span-collecting counterpart of [`Self::pseudonymize_json_in_place`] —
+    /// what `/v1/pseudonymize-json` reports as `{ value, spans }`. Each
+    /// span's `start`/`end` are byte offsets **within the string leaf** it was
+    /// found in, not the serialized document (cross-leaf offset math is not
+    /// meaningful — same rule as the JSON auditor, `docs/CONTRACT.md` §4.2).
+    pub fn pseudonymize_json_in_place_collect(&mut self, value: &mut Value) -> Vec<Replacement> {
+        let mut spans = Vec::new();
+        pseudonymize_json_collect_depth(value, self, MAX_JSON_DEPTH, &mut spans);
+        spans
     }
 
     /// Reverse counterpart: walk the same shape, rewrite pseudonyms in
@@ -286,6 +336,41 @@ fn pseudonymize_json_depth<D: Detector>(
                     continue;
                 }
                 pseudonymize_json_depth(v, pipeline, depth - 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Span-collecting walker for [`VeilPipeline::pseudonymize_json_in_place_collect`].
+/// Mirrors `pseudonymize_json_depth` but runs the with-spans text pass on each
+/// leaf and accumulates the replacements (offsets relative to each leaf).
+fn pseudonymize_json_collect_depth<D: Detector>(
+    value: &mut Value,
+    pipeline: &mut VeilPipeline<D>,
+    depth: usize,
+    spans: &mut Vec<Replacement>,
+) {
+    if depth == 0 {
+        return;
+    }
+    match value {
+        Value::String(s) => {
+            let (rewritten, mut leaf_spans) = pipeline.pseudonymize_with_spans(s);
+            *s = rewritten;
+            spans.append(&mut leaf_spans);
+        }
+        Value::Array(items) => {
+            for item in items {
+                pseudonymize_json_collect_depth(item, pipeline, depth - 1, spans);
+            }
+        }
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if RESERVED_JSON_KEYS.contains(&k.as_str()) {
+                    continue;
+                }
+                pseudonymize_json_collect_depth(v, pipeline, depth - 1, spans);
             }
         }
         _ => {}
