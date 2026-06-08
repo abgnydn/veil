@@ -7,21 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  ts:
-    name: typescript (build + typecheck)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm run build:ts
-
   rust:
-    name: rust (build + test)
+    name: rust (test + clippy)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -29,8 +16,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
       - run: cargo build --release
       - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+
+  ts:
+    name: typescript (typecheck + build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build:ts
+      - run: bun test
+        working-directory: ts
+
+  mcp-example:
+    name: mcp example (typecheck + e2e)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/mcp-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: bun test
+
+  e2e:
+    name: full-stack e2e (engine + GLiNER stub)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      # python3 is preinstalled on ubuntu-latest; the stub needs only stdlib.
+      - run: ./scripts/e2e.sh
