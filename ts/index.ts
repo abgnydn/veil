@@ -50,6 +50,38 @@ export {
   type RouteResult,
 } from "./router";
 
+// Rust engine client — the shell's link to the canonical pseudonymizer
+export {
+  RustPipelineClient,
+  RustPipelineError,
+  kindFloorTier,
+  type RustPipelineClientOpts,
+  type CanonicalKind,
+  type WireSource,
+  type WireSpan,
+  type WireAuditReason,
+  type WireFinding,
+  type PseudonymizeResult,
+  type PseudonymizeJsonResult,
+} from "./rust-client";
+
+// Veil wrapper — runs the pseudonymization round-trip around any backend's chat
+export {
+  wrapWithVeil,
+  reverseMapStream,
+  type WrapOpts,
+} from "./veil-wrap";
+
+// Enforcer — tier-enforcement hook a consumer (MCP server) calls end-to-end
+export {
+  VeilEnforcer,
+  collectText,
+  type VeilEnforcerOpts,
+  type EnforceResult,
+  type Dispatched,
+  type Withheld,
+} from "./enforce";
+
 // Adapter — WebLLM (in-browser, default zero-install backend)
 export {
   WebLLMAdapter,
