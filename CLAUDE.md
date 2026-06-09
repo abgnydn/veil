@@ -121,19 +121,14 @@ ts/
 ├── cohort-scramble.ts  per-cohort number scramble (fingerprint defense)
 ├── anthropic.ts        Anthropic adapter (hard-blocks secret + raw private at construction)
 ├── openai-compat.ts    Ollama / LM Studio / llamafile / vLLM adapter (SSE streaming)
-├── classifier.ts       caution-biased heuristic classifier
-├── cohort.ts           ⚠️ LEGACY stub (cohortBlend/VaultRef) — superseded by engine /v1/cohort
-└── router.ts           ⚠️ LEGACY routing primitive (routeMessage) — superseded by VeilEnforcer
+└── classifier.ts       caution-biased heuristic classifier
 examples/mcp-server/    MCP consumer · examples/gliner-detector/  GLiNER NER server + eval
 docs/VEIL.md            full design spec · docs/CONTRACT.md  wire contract
 ```
 
-> **Legacy note:** `ts/cohort.ts` (the `VaultRef`/`cohortBlend` stub) and
-> `ts/router.ts` (`routeMessage`) predate the Rust-engine canonical path and are
-> used by no real consumer (only their own tests + `index.ts` re-export). The
-> live path is `VeilEnforcer` + engine `/v1/cohort` + `cohort-scramble`. They're
-> kept (still exported, still green) but are candidates for removal — gate that
-> on an explicit decision since it drops public exports.
+_(`ts/cohort.ts` + `ts/router.ts` — the old `VaultRef`/`cohortBlend` stub and
+`routeMessage` primitive — were removed 2026-06-09: superseded by `VeilEnforcer`
++ engine `/v1/cohort` + `cohort-scramble`, used by no real consumer.)_
 
 ## Working agreement
 

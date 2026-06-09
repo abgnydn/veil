@@ -33,23 +33,6 @@ export {
   unsupported,
 } from "./classifier";
 
-// Cohort blender (k-anon for the `private` tier)
-export {
-  cohortBlend,
-  flattenCohort,
-  type VaultRef,
-  type VaultNeighbor,
-  type CohortBlendOpts,
-  type CohortPlan,
-} from "./cohort";
-
-// Router (input-side checkpoint, fetch-side checkpoint, hard invariants)
-export {
-  routeMessage,
-  type Ctx,
-  type RouteResult,
-} from "./router";
-
 // Rust engine client — the shell's link to the canonical pseudonymizer
 export {
   RustPipelineClient,
