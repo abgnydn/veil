@@ -1,0 +1,3 @@
+# This is a demo fixture repo. The .env here holds FAKE credentials on purpose
+# (it's the file veil withholds in the demo), so it is tracked deliberately.
+!.env

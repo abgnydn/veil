@@ -125,13 +125,20 @@ impl RegexDetector {
     pub fn new() -> Self {
         // Order matters: URL is checked before email so that an `@` inside
         // a URL does not get carved out as an email span.
+        // URL/PATH exclude trailing delimiters — quotes, commas, brackets,
+        // braces, angle brackets, backtick — so a value in code or JSON
+        // (`"https://x.dev",`) doesn't swallow the closing `"`/`,`. Without
+        // this the span eats surrounding syntax and mangles the round-trip.
         let raw: &[(EntityKind, &str)] = &[
-            (EntityKind::Url, r"https?://[^\s)\]>]+"),
+            (EntityKind::Url, "https?://[^\\s)\\]}>\"',`<]+"),
             (
                 EntityKind::Email,
                 r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
             ),
-            (EntityKind::Path, r"/(?:Users|home|tmp|var|opt|etc|usr)/\S+"),
+            (
+                EntityKind::Path,
+                "/(?:Users|home|tmp|var|opt|etc|usr)/[^\\s)\\]}>\"',`<]+",
+            ),
             (EntityKind::Ip, r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
             (
                 EntityKind::Uuid,
@@ -209,6 +216,20 @@ mod tests {
         assert!(kinds.contains(&EntityKind::Ip));
         assert!(kinds.contains(&EntityKind::Url));
         assert!(kinds.contains(&EntityKind::Uuid));
+    }
+
+    #[test]
+    fn url_and_path_do_not_swallow_trailing_quote_or_comma() {
+        // The agentic case: a URL/path as a value in code or JSON. The span
+        // must stop at the closing quote, not eat it (or the surrounding
+        // syntax breaks when pseudonymized).
+        let d = RegexDetector::new();
+        let input = r#"{"authUrl": "https://auth.internal.acme.dev", "doc": "/Users/x/run.md"}"#;
+        let found = d.detect(input);
+        let url = found.iter().find(|e| e.kind == EntityKind::Url).unwrap();
+        assert_eq!(url.text, "https://auth.internal.acme.dev");
+        let path = found.iter().find(|e| e.kind == EntityKind::Path).unwrap();
+        assert_eq!(path.text, "/Users/x/run.md");
     }
 
     #[test]
