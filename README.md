@@ -2,6 +2,8 @@
 
 > A privacy layer between your app and any third-party LLM. The model sees `EMAIL_1`; the user sees `alice@acme.com` back.
 
+**🌐 [veil-7xs.pages.dev](https://veil-7xs.pages.dev/)** — what it does, in one page.
+
 [![CI](https://github.com/abgnydn/veil/actions/workflows/ci.yml/badge.svg)](https://github.com/abgnydn/veil/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org/)

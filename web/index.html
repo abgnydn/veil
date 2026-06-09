@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>veil — use any AI on your private data, without handing it the data</title>
+<meta name="description" content="A privacy layer between your app and any third-party LLM. The model sees EMAIL_1; you see alice@acme.com back. Secrets never leave your machine. Open source.">
+<meta property="og:title" content="veil — your data never leaves; the AI still works">
+<meta property="og:description" content="The model sees EMAIL_1. You see alice@acme.com back. Secrets stay on your machine. Open source.">
+<style>
+  :root{
+    --bg:#0b0e13; --panel:#11151c; --line:#1f2630; --ink:#e7ecf2; --mut:#8a97a6;
+    --grn:#3ad08a; --teal:#36c9bd; --red:#f06c5d; --amber:#e0a23a; --cyan:#5cc8e8;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#13202a 0%,var(--bg) 60%);
+    color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    letter-spacing:-0.01em}
+  .wrap{max-width:820px;margin:0 auto;padding:0 22px}
+  a{color:var(--teal);text-decoration:none}a:hover{text-decoration:underline}
+  .mono{font-family:var(--mono)}
+
+  header{padding:70px 0 30px;text-align:center}
+  .tag{display:inline-block;font:600 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+    color:var(--teal);border:1px solid var(--line);background:#0e161c;padding:7px 12px;border-radius:999px;margin-bottom:24px}
+  h1{font-size:46px;line-height:1.04;margin:0 0 16px;letter-spacing:-0.035em;font-weight:750}
+  h1 .hl{color:var(--grn)}
+  .sub{font-size:20px;color:var(--mut);margin:0 auto;max-width:62ch}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:30px 0 6px}
+  .btn{font:600 15px/1 inherit;padding:13px 20px;border-radius:11px;border:1px solid var(--line)}
+  .btn.p{background:var(--grn);color:#06231a;border-color:var(--grn)}
+  .btn.s{background:#0e161c;color:var(--ink)}
+  .btn.s:hover,.btn.p:hover{text-decoration:none;filter:brightness(1.08)}
+  .micro{color:var(--mut);font-size:13px;margin-top:14px}
+
+  /* terminal */
+  .term{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    box-shadow:0 24px 60px -30px #000;margin:34px 0}
+  .bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);background:#0e131a}
+  .bar i{width:11px;height:11px;border-radius:50%;display:inline-block;background:#2a323d}
+  .bar .t{margin-left:8px;color:var(--mut);font:12px/1 var(--mono)}
+  pre{margin:0;padding:18px 18px 20px;font-family:var(--mono);font-size:13px;line-height:1.65;
+    overflow-x:auto;white-space:pre;tab-size:2}
+  .c-mut{color:var(--mut)} .c-grn{color:var(--grn)} .c-cyan{color:var(--cyan)}
+  .c-red{color:var(--red)} .c-amber{color:var(--amber)} .c-ink{color:var(--ink)}
+  .lbl{color:var(--mut);font-size:12px;font-family:var(--mono);margin:0 0 6px}
+
+  section{padding:40px 0;border-top:1px solid var(--line)}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);margin:0 0 18px;font-weight:700}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .card h3{margin:0 0 6px;font-size:16px;letter-spacing:-0.02em}
+  .card p{margin:0;font-size:14px;color:var(--mut)}
+  .card .k{font-family:var(--mono);color:var(--ink);font-size:13px}
+
+  .tiers{display:flex;flex-direction:column;gap:8px}
+  .row{display:grid;grid-template-columns:108px 1fr;gap:14px;align-items:baseline;padding:11px 0;border-top:1px solid var(--line)}
+  .row:first-child{border-top:0}
+  .row .n{font:700 13px/1.4 var(--mono)} .row .d{font-size:14.5px;color:var(--mut)}
+  .row .d b{color:var(--ink);font-weight:600}
+  .g{color:#56c98a}.b{color:#5c97e0}.o{color:var(--amber)}.r{color:var(--red)}
+
+  .honest{background:#14110c;border:1px solid #33291a;border-radius:12px;padding:16px 18px;color:#cdb892;font-size:14.5px}
+  .honest b{color:#e7c98c}
+  footer{padding:40px 0 70px;text-align:center;color:var(--mut);font-size:13.5px}
+  code.inl{font-family:var(--mono);background:#0e161c;border:1px solid var(--line);padding:2px 7px;border-radius:6px;font-size:12.5px;color:var(--ink)}
+  @media(max-width:560px){h1{font-size:34px}.sub{font-size:18px}.grid{grid-template-columns:1fr}.row{grid-template-columns:1fr;gap:4px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="tag">open source · localhost · apache-2.0</span>
+    <h1>Use any AI on your private data —<br><span class="hl">without handing it the data.</span></h1>
+    <p class="sub">veil sits between your app and any third-party model. It swaps real identifiers for
+    stable code-names before the prompt leaves your machine, and swaps them back in the reply. The
+    model is useful. It just never learns who anyone is — and your secrets never leave at all.</p>
+    <div class="cta">
+      <a class="btn p" href="https://github.com/abgnydn/veil">View on GitHub →</a>
+      <a class="btn s" href="https://github.com/abgnydn/veil/tree/main/examples/coding-agent">See the live demo</a>
+    </div>
+    <div class="micro">No API token. Runs on a model you already pay for.</div>
+  </header>
+
+  <p class="lbl">A real Claude fixes a real bug — seeing only pseudonyms. Captured, not mocked:</p>
+  <div class="term">
+    <div class="bar"><i></i><i></i><i></i><span class="t">./demo-live.sh</span></div>
+<pre><span class="c-ink">What we send to Claude</span> <span class="c-mut">(your `claude` login — no API token; tools off)</span>
+  <span class="c-grn">// owner: EMAIL_1  (escalations: EMAIL_2)</span>
+  <span class="c-grn">const TOKEN_TTL = 15 * 60; // &lt;-- should be 24 * 60 * 60 * 1000</span>
+  <span class="c-mut">…  (config.ts → URL_1 / IP_1 / PATH_1; .env withheld)</span>
+
+<span class="c-amber">  calling the real model…</span>
+
+<span class="c-ink">Claude's answer</span> <span class="c-mut">(reverse-mapped for you)</span>
+  <span class="c-cyan">The TTL is 15 * 60 (15 minutes in seconds) but the store reads it as</span>
+  <span class="c-cyan">milliseconds — wrong unit and duration. Fix:</span>
+  <span class="c-cyan">  const TOKEN_TTL = 24 * 60 * 60 * 1000;</span>
+
+<span class="c-mut">  A frontier model fixed your bug and never saw an email, path, URL, or your .env.</span></pre>
+  </div>
+
+  <section>
+    <h2>The one idea</h2>
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span class="t">on the wire</span></div>
+<pre><span class="c-mut">you type   </span> remind <span class="c-red">alice@acme.com</span> about <span class="c-red">/Users/baris/q3.pdf</span>
+<span class="c-mut">model sees </span> remind <span class="c-grn">EMAIL_1</span> about <span class="c-grn">PATH_1</span>          <span class="c-mut">← pseudonymized</span>
+<span class="c-mut">you get    </span> Reminded <span class="c-red">alice@acme.com</span>.                <span class="c-mut">← restored locally</span></pre>
+    </div>
+    <p style="color:var(--mut);font-size:15px">The same person is always <span class="mono c-grn">EMAIL_1</span> within a conversation,
+    so the model can still reason about "who you mentioned earlier" — without ever learning the real name.</p>
+  </section>
+
+  <section>
+    <h2>Four levels. Two rules, enforced in code.</h2>
+    <div class="tiers">
+      <div class="row"><div class="n g">public</div><div class="d">general knowledge → sent <b>as-is</b>.</div></div>
+      <div class="row"><div class="n b">internal</div><div class="d">mildly identifying → sent <b>as-is</b>.</div></div>
+      <div class="row"><div class="n o">private</div><div class="d">emails, names, paths → <b>pseudonymized</b> before the wire (optionally <b>k-anonymized</b>: hidden among look-alike decoys).</div></div>
+      <div class="row"><div class="n r">secret</div><div class="d">keys, credentials, IDs → run on a <b>local</b> model only. No local model? <b>Withheld</b> — never sent to a third party.</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it's built</h2>
+    <div class="grid">
+      <div class="card"><h3>A Rust engine</h3><p>Does the swap-and-restore round-trip and holds the mapping. Binds <span class="k">localhost</span> only — the one part that sees real data.</p></div>
+      <div class="card"><h3>A TypeScript shell</h3><p>Sorts the tiers, talks to the model (Anthropic, Ollama, …), streams the reply back, restoring names as tokens arrive.</p></div>
+      <div class="card"><h3>A name detector</h3><p>Regex for emails / paths / IPs / URLs; a small local model (<span class="k">GLiNER</span>) for the people, places and companies regex can't catch.</p></div>
+      <div class="card"><h3>An MCP server</h3><p>Drop it in front of a coding agent (Claude, Cursor) and every file it reads is sanitized before the model sees it.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Honest about its edges</h2>
+    <div class="honest"><b>veil is a strong privacy layer, not a magic guarantee.</b> The name detector catches
+    ~92% of people/places/orgs (recall is what matters — a miss is a leak), and over-flags sometimes.
+    k-anonymity defeats the "which one is real?" attacks; hiding a prompt's full <i>topic</i> is still a
+    work in progress. It shrinks what a third party sees dramatically, and keeps the truly sensitive
+    on your machine — and it's upfront about the rest.</div>
+  </section>
+
+  <footer>
+    <code class="inl">cargo run --bin veil_server</code> &nbsp;·&nbsp; open source, Apache-2.0<br><br>
+    <a href="https://github.com/abgnydn/veil">github.com/abgnydn/veil</a>
+  </footer>
+
+</div>
+</body>
+</html>
