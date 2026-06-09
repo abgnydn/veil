@@ -5,12 +5,31 @@ where **every file it reads is veil-sanitized before the model sees it**.
 
 ```bash
 npm install
-./demo.sh          # boots the engine, runs the scripted agent, prints the wire
+./demo.sh          # scripted agent — no model called, nothing leaves the machine
+./demo-live.sh     # a REAL Claude fixes the bug, seeing only pseudonyms
 ```
 
-It drives a real MCP filesystem server (`fs-server.ts`) — `read_file`,
-`list_dir`, `grep` — through a real MCP client. No model is called and nothing
-leaves your machine; the demo prints exactly what a cloud model *would* receive.
+`demo.sh` drives a real MCP filesystem server (`fs-server.ts`) — `read_file`,
+`list_dir`, `grep` — through a real MCP client, and prints exactly what a cloud
+model *would* receive.
+
+`demo-live.sh` goes all the way: it hands the **sanitized** code to a real Claude
+via your local `claude` CLI login (**no API token**), with tools disabled so the
+model can only use the text it's given. Claude diagnoses and fixes the bug while
+seeing `EMAIL_1`/`PATH_1`/`URL_1` — and its answer is reverse-mapped for you. One
+real (billed-to-your-plan) model call. Real output:
+
+```
+What we send to Claude (via your `claude` login — no API token; tools off):
+  // owner: EMAIL_1  (escalations: EMAIL_2)
+  const TOKEN_TTL = 15 * 60; // <-- should be 24 * 60 * 60 * 1000
+
+Claude's answer:
+  The TTL is 15 * 60 (15 minutes in seconds) but the store interprets it as
+  milliseconds … const TOKEN_TTL = 24 * 60 * 60 * 1000;
+```
+
+A frontier model fixed a real bug and learned no real identifier.
 
 ## What you see
 
