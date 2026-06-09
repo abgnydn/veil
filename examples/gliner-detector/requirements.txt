@@ -2,3 +2,5 @@
 # Verified working combo (python 3.12): gliner 0.2.26, torch 2.12.0,
 # transformers 5.1.0. Peak RSS ~1.9 GB with knowledgator/gliner-pii-base-v1.0.
 gliner>=0.2.13
+# benchmark.py only (streams ai4privacy/pii-masking-200k):
+datasets>=2.0

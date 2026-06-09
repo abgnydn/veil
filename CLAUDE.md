@@ -76,14 +76,15 @@ would re-implement the entire tested Rust engine in TypeScript.
    multibyte chars. Peak RSS ~1.9 GB, load ~48s cold / ~15s warm. Verified
    combo: python 3.12, gliner 0.2.26, torch 2.12.0, transformers 5.1.0 (in
    `examples/gliner-detector/.venv`, gitignored). **Phase 1 is functionally
-   complete.** Accuracy measured (`examples/gliner-detector/eval.py`, EN+TR,
-   relaxed match): base model F1 0.89 / recall 0.91 at threshold **0.5**
-   (confirmed optimal — the server default; 0.3 adds FPs, 0.7 drops recall);
-   person strongest, org weakest (ambiguity). ~9% miss rate even at best — why
-   secret stays local + regex covers deterministic kinds. Edge variant is a
-   different token-level arch (UniEncoderTokenGLiNER), needs its own invocation,
-   deferred. Remaining: a real labeled-corpus benchmark (this set is small/
-   synthetic) if a published number is ever needed.
+   complete.** Accuracy **benchmarked on ai4privacy/pii-masking-200k**
+   (`examples/gliner-detector/benchmark.py`, 500 EN examples, independent-overlap
+   match): at threshold **0.5** (server default) recall **0.92** / precision
+   **0.45** / F1 0.60 — recall-strong (what a privacy filter needs; ~8% miss →
+   why secret stays local + regex covers deterministic kinds), precision
+   mediocre (over-predicts, esp. org; precision is a lower bound — only 6 labels
+   mapped to gold). The 22-sentence `eval.py` (F1 0.89) was optimistic; this
+   corrects it. Edge variant (UniEncoderTokenGLiNER) needs its own invocation,
+   deferred.
 
 8. ✅ **Cohort blending (k-anonymity) shipped** (2026-06-08) — the last big
    feature gap. Engine `/v1/cohort` (Rust `StaticPoolSynthesizer` +
