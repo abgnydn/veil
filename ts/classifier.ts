@@ -121,6 +121,7 @@ const SECRET_KEYWORDS = [
   "api key",
   "secret_key",
   "secret key",
+  "secret_access_key",
   "private_key",
   "private key",
   "access_token",
@@ -139,10 +140,15 @@ const FRONTMATTER_SECRET_RE = /^---[\s\S]*?\n\s*sensitivity\s*:\s*secret\s*\n[\s
 /** YAML frontmatter `sensitivity: private`. */
 const FRONTMATTER_PRIVATE_RE = /^---[\s\S]*?\n\s*sensitivity\s*:\s*private\s*\n[\s\S]*?---/im;
 
-/** A line shaped like `KEY=value` or `KEY="value"` — .env / shell export. */
-const ENV_STYLE_RE = /(^|\n)\s*(?:export\s+)?[A-Z][A-Z0-9_]{2,}=\s*["']?[^\s"'\n]{6,}/m;
+/** A `KEY=value` / `KEY="value"` assignment anywhere in the text — .env / shell
+ *  export / inline credential. Not anchored to line-start: `deploy with
+ *  AWS_SECRET_ACCESS_KEY=…` must flag too. Requires 3+ uppercase chars before
+ *  `=` so ordinary prose ("a=b") doesn't trip it. */
+const ENV_STYLE_RE = /(?:^|\s)(?:export\s+)?[A-Z][A-Z0-9_]{2,}=\s*["']?[^\s"'\n]{6,}/m;
 
-/** API-key-shaped tokens: long base64-ish or `sk-`/`pk-` prefixed strings. */
+/** API-key-shaped tokens: long base64-ish or vendor-prefixed strings. Generic
+ *  fallback stays 40+ to avoid flagging UUIDs (36) / git SHAs; inline
+ *  `KEY=value` credentials are caught by ENV_STYLE_RE instead. */
 const API_KEY_RE = /\b(?:sk-[A-Za-z0-9_-]{20,}|pk_[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|[A-Za-z0-9_-]{40,})\b/;
 
 // ---- Scoring --------------------------------------------------------------

@@ -66,6 +66,29 @@ veil classifies content into four tiers and enforces two hard invariants **in co
 
 For `private` content, pseudonymization hides the *values* but the prompt still reveals one real user. With `cohortK>1`, veil fans the prompt out alongside `k-1` siblings whose pseudonyms are drawn from a disjoint pool, then **crypto-scrambles every number into one space** so real and siblings are indistinguishable — a wire-side adversary picks the real one with probability `1/k` (entropy `log2(k)`). The real response is un-scrambled and reverse-mapped; siblings are dropped. Off by default (costs k× provider calls). See [`docs/CONTRACT.md §9`](./docs/CONTRACT.md) for the closed/open caveats.
 
+## See it in 10 seconds
+
+```bash
+./scripts/demo.sh
+```
+
+Drives the real enforcer with a stand-in cloud provider that **records the exact
+bytes it receives** — no API key, nothing sent anywhere:
+
+```
+You type:
+  Email the Q3 deck at /Users/baris/q3.pdf to alice@acme.com, CC bob@acme.com …
+What the cloud actually receives:        (captured off the wire, tier=private)
+  Email the Q3 deck at PATH_1 to EMAIL_1, CC EMAIL_2 …      ← identifiers gone
+What you get back:                       (real values restored locally)
+  Done — Email the Q3 deck at /Users/baris/q3.pdf to alice@acme.com …
+
+You type:
+  deploy prod with AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY
+What the cloud receives:
+  ✗ nothing.  secret-tier → withheld, fail-closed.
+```
+
 ## Quick start
 
 ### 1. Start the engine
