@@ -184,6 +184,11 @@ pub struct CohortReq {
     pub text: String,
     /// Cohort size. k<=1 is a no-op (returns the real prompt only).
     pub k: usize,
+    /// When true, siblings are topic-diverse decoy sentences (content-hiding)
+    /// instead of renumbered copies of the real prompt — for entity profiles
+    /// the decoy corpus covers; falls back to renumbered copies otherwise.
+    #[serde(default)]
+    pub content_hiding: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -414,12 +419,23 @@ async fn cohort(State(state): State<AppState>, Json(req): Json<CohortReq>) -> Js
         synth.synthesize(&real_entities, req.k).unwrap_or_default()
     };
 
-    // 4. Build the cohort: real first, then each sibling with its pseudonyms
-    //    substituted in. real_index = 0 (the caller may shuffle).
+    // 4. Build the cohort: real first, then the siblings. With content-hiding,
+    //    siblings are topic-diverse decoy sentences (when the corpus covers the
+    //    entity profile); otherwise renumbered copies of the real prompt.
     let mut cohort = Vec::with_capacity(siblings.len() + 1);
     cohort.push(real_text.clone());
-    for sib in &siblings {
-        cohort.push(substitute_pseudonyms(&real_text, &real_entities, sib));
+    let decoys = if req.content_hiding {
+        crate::decoy::decoy_siblings(&real_entities, &siblings)
+    } else {
+        None
+    };
+    match decoys {
+        Some(texts) => cohort.extend(texts),
+        None => {
+            for sib in &siblings {
+                cohort.push(substitute_pseudonyms(&real_text, &real_entities, sib));
+            }
+        }
     }
 
     let achieved_k = cohort.len();
@@ -698,6 +714,32 @@ mod tests {
             .json(&serde_json::json!({"session_id":"c1","text":"done EMAIL_1"}))
             .send().await.unwrap().json().await.unwrap();
         assert_eq!(real["text"], "done alice@acme.com");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn http_cohort_content_hiding_uses_decoy_sentences() {
+        let base = spawn_server().await;
+        let client = reqwest::Client::new();
+        let res: Value = client
+            .post(format!("{base}/v1/cohort"))
+            .json(&serde_json::json!({
+                "session_id":"ch","text":"remind alice@acme.com now","k":4,"content_hiding":true
+            }))
+            .send().await.unwrap().json().await.unwrap();
+        let cohort = res["cohort"].as_array().unwrap();
+        assert_eq!(cohort.len(), 4);
+        // The real prompt (index 0) keeps the user's own phrasing.
+        assert_eq!(cohort[0], "remind EMAIL_1 now");
+        // Siblings are decoy sentences carrying pool pseudonyms — NOT renumbered
+        // copies of the real template.
+        for sib in &cohort[1..] {
+            let s = sib.as_str().unwrap();
+            assert!(s.contains("EMAIL_"), "decoy must carry an email pseudonym: {s}");
+            assert!(
+                !s.starts_with("remind EMAIL_"),
+                "sibling should be a decoy, not a renumbered copy: {s}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

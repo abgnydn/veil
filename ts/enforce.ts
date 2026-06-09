@@ -53,6 +53,10 @@ export interface VeilEnforcerOpts {
    *  log2(k)). Default 1 (pseudonymize only, no fan-out). Cohort dispatch is
    *  batch, not streamed (VEIL.md §4.3). Costs k× the provider calls. */
   cohortK?: number;
+  /** With cohort fan-out, make siblings topic-diverse decoy sentences instead
+   *  of renumbered copies of the real prompt — hides the prompt's subject too
+   *  (for entity profiles the decoy corpus covers). Default false. */
+  cohortContentHiding?: boolean;
 }
 
 /** Secret content with nowhere local to run — refused, not sent remote. */
@@ -191,7 +195,7 @@ export class VeilEnforcer {
     k: number,
   ): Promise<Dispatched> {
     const { engine, sessionId } = this.opts;
-    const plan = await engine.cohort(sessionId, input, k);
+    const plan = await engine.cohort(sessionId, input, k, this.opts.cohortContentHiding ?? false);
 
     // Scramble every pseudonym number into one random space so the real prompt
     // (low session #) is indistinguishable from siblings (high pool #) — closes

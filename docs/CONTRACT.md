@@ -269,7 +269,8 @@ pseudonyms are drawn from a pool disjoint from the session — so a wire-side
 adversary picks the real one with probability `1/k` (entropy `log2(k)`).
 
 ```
-POST /v1/cohort  { "session_id": "...", "text": "...", "k": 8 }
+POST /v1/cohort  { "session_id": "...", "text": "...", "k": 8,
+                   "content_hiding": false }
               -> { "cohort": ["...", "..."], "real_index": 0,
                    "requested_k": 8, "achieved_k": 8 }
 ```
@@ -297,11 +298,21 @@ POST /v1/cohort  { "session_id": "...", "text": "...", "k": 8 }
   set no longer produces the same wire numbers across turns.
 - *Positional fingerprint.* The cohort is shuffled before dispatch.
 
+**Partially addressed — `content_hiding` (opt-in):**
+- With `content_hiding: false` (default), siblings are renumbered copies of the
+  real prompt, so all k share the same non-pseudonym text — the adversary learns
+  the prompt's template/topic, just not which entity set is real.
+- With `content_hiding: true`, siblings become topic-diverse **decoy sentences**
+  (a built-in corpus indexed by entity profile; falls back to renumbered copies
+  for uncovered profiles). This hides the **entity-relationship structure** —
+  but **not** the real prompt's distinctive non-entity vocabulary: the real
+  keeps the user's own phrasing (e.g. the word "contract"), which generic decoys
+  don't contain, so a vocabulary-aware adversary can still single it out. Most
+  effective for short, entity-centric prompts; weak for content-rich ones. True
+  content-indistinguishability needs decoys drawn from the user's own
+  distribution (the vault-neighbor approach of §4.1: embeddings + K-NN over a
+  local note store — not built).
+
 **Still open:**
-- *Content-template reveal.* Siblings are renumbered copies of the real prompt,
-  so all k share the same non-pseudonym text — the adversary learns the prompt's
-  shape/topic, just not which entity set is real. Hiding content needs genuinely
-  different sibling prompts (the vault-neighbor approach of §4.1: embeddings +
-  K-NN over a local note store, not yet built).
 - *Timing side-channel.* Fan-out is concurrent but an adversary with precise
   timing could still correlate. Mitigation deferred.

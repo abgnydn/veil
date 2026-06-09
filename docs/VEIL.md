@@ -391,7 +391,7 @@ For a `private` text whose pseudonymized entity set is `E = {e_1, ..., e_n}`:
 - **Positional fingerprint.** The cohort is shuffled before dispatch.
 
 **Still open (ship the caveats):**
-- **Content-template reveal.** Siblings are renumbered copies of the real prompt, so all k share the same non-pseudonym text — the adversary learns the prompt's shape/topic, not which entity set is real. Hiding content needs genuinely different sibling prompts (the vault-neighbor approach of §4.1: embeddings + K-NN over a local note store — not yet built).
+- **Content-template reveal** — *partially addressed by `content_hiding` (opt-in, 2026-06-09).* By default siblings are renumbered copies of the real prompt (template revealed). With `content_hiding: true`, siblings become topic-diverse decoy sentences (built-in corpus by entity profile), hiding the entity-relationship structure — but **not** the real prompt's distinctive non-entity vocabulary (the user's own phrasing still stands out; most effective for short entity-centric prompts). Full content-indistinguishability still needs the vault-neighbor approach (§4.1: embeddings + K-NN over the user's own notes — not built).
 - **Request-time jitter.** Fan-out is concurrent (`Promise.all`), but an adversary with µs-precision timing could still correlate. Mitigation deferred.
 - **Streaming.** Cohort fan-out is batch-only; streaming-with-cohort is future work.
 

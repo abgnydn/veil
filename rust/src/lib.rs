@@ -21,6 +21,7 @@
 pub mod audit;
 pub mod bitnet;
 pub mod cohort;
+pub mod decoy;
 pub mod entities;
 pub mod llama;
 pub mod pipeline;
@@ -36,6 +37,7 @@ pub use cohort::{
     substitute_pseudonyms, CohortError, CohortFailure, CohortPolicy, CohortSynthesizer,
     PromptEntities, StaticPoolSynthesizer,
 };
+pub use decoy::decoy_siblings;
 pub use entities::{DetectedEntity, Detector, EntityKind, RegexDetector};
 pub use llama::LlamaCompletionDetector;
 pub use pipeline::{Replacement, VeilPipeline};

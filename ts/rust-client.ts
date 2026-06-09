@@ -182,14 +182,23 @@ export class RustPipelineClient {
 
   /** Build a k-anonymous cohort for `text`: k kind-shape-identical prompts
    *  (real + k-1 pool-disjoint siblings). The caller fans out all k, keeps the
-   *  real one's response, drops the rest. See docs/CONTRACT.md §9. */
-  async cohort(sessionId: string, text: string, k: number): Promise<CohortResult> {
+   *  real one's response, drops the rest. See docs/CONTRACT.md §9.
+   *
+   *  `contentHiding` makes siblings topic-diverse decoy sentences instead of
+   *  renumbered copies of the real prompt (where the corpus covers the entity
+   *  profile) — hides the prompt's subject, not just its values. */
+  async cohort(
+    sessionId: string,
+    text: string,
+    k: number,
+    contentHiding = false,
+  ): Promise<CohortResult> {
     const res = await this.post<{
       cohort: string[];
       real_index: number;
       requested_k: number;
       achieved_k: number;
-    }>("/v1/cohort", { session_id: sessionId, text, k });
+    }>("/v1/cohort", { session_id: sessionId, text, k, content_hiding: contentHiding });
     return {
       cohort: res.cohort,
       realIndex: res.real_index,

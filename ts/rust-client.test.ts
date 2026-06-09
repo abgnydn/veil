@@ -112,7 +112,17 @@ describe("RustPipelineClient — wire transport", () => {
       session_id: "s",
       text: "remind alice@acme.com",
       k: 2,
+      content_hiding: false,
     });
+  });
+
+  test("cohort forwards the content_hiding flag", async () => {
+    const { fetchImpl, calls } = mockFetch(() => ({
+      body: { cohort: ["x"], real_index: 0, requested_k: 1, achieved_k: 1 },
+    }));
+    const client = new RustPipelineClient({ fetchImpl });
+    await client.cohort("s", "t", 4, true);
+    expect(JSON.parse(calls[0]?.init.body as string).content_hiding).toBe(true);
   });
 
   test("health is true on 2xx and false (never throws) on failure", async () => {
