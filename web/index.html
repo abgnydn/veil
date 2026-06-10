@@ -137,14 +137,14 @@
 
   <section>
     <h2>Honest about its edges</h2>
-    <div class="honest"><b>veil is a privacy layer, not a guarantee — and the numbers are public.</b>
-    On <a href="https://huggingface.co/datasets/Columbia-NLP/PUPA" style="color:#e7c98c;text-decoration:underline">PUPA</a>,
-    the benchmark from the <a href="https://arxiv.org/abs/2410.17127" style="color:#e7c98c;text-decoration:underline">PAPILLON</a>
-    paper, veil leaks <b>33.5%</b> of PII units vs PAPILLON's ~7.5% — its fixed-kind detector loses to
-    local-LLM rewriting on messy real-world PII. What veil has that the paper doesn't is <b>exact
-    reversibility</b> (its redaction round-trips perfectly) and that it's auditable shipped code, not a
-    research artifact. It keeps the truly sensitive on your machine, shrinks what the cloud sees — and
-    tells you exactly where it falls short.</div>
+    <div class="honest"><b>The numbers are public — including the unflattering one.</b>
+    On <a href="https://huggingface.co/datasets/Columbia-NLP/PUPA" style="color:#e7c98c;text-decoration:underline">PUPA</a>
+    (the <a href="https://arxiv.org/abs/2410.17127" style="color:#e7c98c;text-decoration:underline">PAPILLON</a>
+    benchmark), veil's <i>default</i> detector leaks <b>33.5%</b> of PII — fixed entity kinds miss the
+    phones, dates and IDs in messy real prompts. Swapping in an <b>LLM detector</b> behind the same
+    boundary drops that to <b>~4%</b> — PAPILLON-class or better, and unlike PAPILLON, <b>still exactly
+    reversible</b>. That's the bet: LLM-grade coverage with a perfect round-trip, as auditable shipped
+    code. It keeps the truly sensitive on your machine — and tells you exactly where it stands.</div>
   </section>
 
   <footer>

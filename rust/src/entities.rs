@@ -24,6 +24,11 @@ pub enum EntityKind {
     Location,
     /// Organization / company name. Learned-detector only.
     Org,
+    /// Catch-all for any other PII a learned/LLM detector flags that has no
+    /// dedicated kind yet — phone, date of birth, account/ID number, address,
+    /// SSN, etc. Pseudonym prefix is `PII`. Lets an LLM detector cover the long
+    /// tail of identifiers (where the leakage hides) while staying reversible.
+    Custom,
 }
 
 impl EntityKind {
@@ -32,7 +37,7 @@ impl EntityKind {
     /// (`pipeline.rs` builds its alternation from these prefixes) so adding a
     /// kind here is the only edit needed — no second regex to keep in sync.
     /// See `docs/CONTRACT.md` §2 for the canonical kind↔prefix table.
-    pub const ALL: [EntityKind; 8] = [
+    pub const ALL: [EntityKind; 9] = [
         Self::Email,
         Self::Path,
         Self::Ip,
@@ -41,6 +46,7 @@ impl EntityKind {
         Self::Person,
         Self::Location,
         Self::Org,
+        Self::Custom,
     ];
 
     /// Upper-case prefix used in generated pseudonyms.
@@ -55,6 +61,7 @@ impl EntityKind {
             Self::Person => "PERSON",
             Self::Location => "LOCATION",
             Self::Org => "ORG",
+            Self::Custom => "PII",
         }
     }
 
@@ -70,6 +77,7 @@ impl EntityKind {
             "PERSON" => Some(Self::Person),
             "LOCATION" => Some(Self::Location),
             "ORG" => Some(Self::Org),
+            "PII" => Some(Self::Custom),
             _ => None,
         }
     }

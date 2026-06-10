@@ -75,6 +75,7 @@ impl From<EntityKind> for CanonicalKind {
             EntityKind::Person => Self::Person,
             EntityKind::Location => Self::Location,
             EntityKind::Org => Self::Org,
+            EntityKind::Custom => Self::Custom,
         }
     }
 }

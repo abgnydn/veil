@@ -91,6 +91,15 @@ would re-implement the entire tested Rust engine in TypeScript.
    local LLM. veil's only edge is exact reversibility (PAPILLON's redaction is
    lossy). Path to close the gap: a local-LLM redactor behind the `Detector`
    boundary. Public claims (README, landing page) corrected to this number.
+   **The fix landed** (2026-06-10, `examples/llm-detector/`): an LLM-backed
+   `/detect` server (claude -p) drops in behind `HttpNerDetector`; added
+   `EntityKind::Custom` (prefix `PII`) as the catch-all for the long tail
+   (phone/DOB/account/address), and `VEIL_DETECTOR_TIMEOUT_MS` (LLM takes
+   seconds; default 1500ms was for GLiNER). Measured through the real engine
+   (`pupa_engine.py`): **~4% leakage AND 12/12 exact reverse-map round-trips** —
+   PAPILLON-class or better *with* exact reversibility, the combination PAPILLON
+   can't offer. Prototype uses claude (not private); production = local model
+   behind the same protocol. The differentiated thing, proven end-to-end.
 
 8. ✅ **Cohort blending (k-anonymity) shipped** (2026-06-08) — the last big
    feature gap. Engine `/v1/cohort` (Rust `StaticPoolSynthesizer` +

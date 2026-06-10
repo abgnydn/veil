@@ -129,7 +129,8 @@ fn normalize_surface(real: &str, kind: EntityKind) -> String {
         | EntityKind::Url
         | EntityKind::Uuid
         | EntityKind::Location
-        | EntityKind::Org => real.to_string(),
+        | EntityKind::Org
+        | EntityKind::Custom => real.to_string(),
     }
 }
 

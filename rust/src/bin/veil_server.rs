@@ -42,11 +42,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // learned-NER server (GLiNER — see examples/gliner-detector/), union it
     // with regex via MergeFallback so the freeform PERSON/LOCATION/ORG kinds
     // are caught too. If that server is down, MergeFallback degrades to regex.
+    // Per-call detector timeout. GLiNER answers in ~50ms (1500 default is fine);
+    // an LLM detector takes seconds, so set VEIL_DETECTOR_TIMEOUT_MS=30000 for it.
+    let detector_timeout = std::env::var("VEIL_DETECTOR_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(1500);
     let detector = match std::env::var("VEIL_DETECTOR_URL") {
         Ok(url) if !url.is_empty() => {
-            eprintln!("veil_server: learned detector at {url} (regex + GLiNER)");
+            eprintln!("veil_server: learned detector at {url} (timeout {detector_timeout}ms)");
             AnyDetector::BitnetMergeRegex(MergeFallback::new(
-                HttpNerDetector::new(url),
+                HttpNerDetector::new(url).with_timeout(Duration::from_millis(detector_timeout)),
                 RegexDetector::new(),
             ))
         }

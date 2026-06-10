@@ -51,19 +51,18 @@ Env: `VEIL_DETECTOR_BIND` (default `127.0.0.1:8808`), `GLINER_MODEL`,
 the published "use a local model as a privacy proxy" system — using its own
 leakage metric (fraction of annotated PII units that reach the remote model).
 
-| system | leakage ↓ | notes |
-|---|---|---|
-| **PAPILLON** (paper) | **~7.5%** | local LLM rewrites the whole prompt — redacts *arbitrary* PII |
-| **veil** (GLiNER + regex) | **33.5%** | fixed entity kinds only — leaks types it has no detector for |
+| system | leakage ↓ | reversible? | notes |
+|---|---|---|---|
+| **PAPILLON** (paper) | ~7.5% | ❌ lossy | local LLM rewrites the whole prompt |
+| **veil — default** (GLiNER + regex) | 33.5% | ✅ exact | fixed kinds only — leaks phones/IDs/dates/addresses |
+| **veil + LLM-detector** | **~4%** | ✅ exact | LLM finds the long tail → `PII` catch-all ([`../llm-detector/`](../llm-detector/)) |
 
-veil catches **66.5%** of annotated PII units and fully sanitizes 68.6% of
-prompts. **It loses to PAPILLON by ~4.5×, and that's the honest picture:** veil's
-fixed-kind detection (person/location/org + email/url/ip) can't touch the phone
-numbers, IDs, dates, and addresses PUPA also annotates, whereas PAPILLON's
-local-LLM rewrite redacts anything in context. The trade veil makes for that gap
-is **exact reversibility** — PAPILLON's redaction is lossy/one-way; veil's
-`EMAIL_1 ↔ alice@acme.com` round-trips perfectly. Closing the gap means putting a
-local-LLM redactor behind veil's `Detector` boundary (it's designed to swap).
+**The default detector loses to PAPILLON ~4.5×** — it can't touch the phone
+numbers, IDs, dates, and addresses PUPA annotates (recall 66.5%, fully sanitizes
+68.6% of prompts). **But swapping GLiNER for an LLM-detector behind the same
+`Detector` boundary closes it** — ~4% leakage on a PUPA sample, *with exact
+reversibility intact*, which PAPILLON's lossy rewrite can't offer. See
+[`examples/llm-detector/`](../llm-detector/) for the wired, measured upgrade.
 
 > Run it: `./.venv/bin/python pupa.py` (needs `datasets`; streams PUPA).
 
