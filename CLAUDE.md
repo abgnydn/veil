@@ -84,7 +84,13 @@ would re-implement the entire tested Rust engine in TypeScript.
    mediocre (over-predicts, esp. org; precision is a lower bound — only 6 labels
    mapped to gold). The 22-sentence `eval.py` (F1 0.89) was optimistic; this
    corrects it. Edge variant (UniEncoderTokenGLiNER) needs its own invocation,
-   deferred.
+   deferred. **Head-to-head vs SOTA** (`pupa.py`, 2026-06-10): on PUPA (the
+   PAPILLON benchmark) veil leaks **33.5%** of PII units vs PAPILLON's ~7.5% —
+   ~4.5× worse. Structural: veil's fixed-kind detection can't touch the phones/
+   IDs/dates/addresses PUPA annotates; PAPILLON rewrites the whole prompt with a
+   local LLM. veil's only edge is exact reversibility (PAPILLON's redaction is
+   lossy). Path to close the gap: a local-LLM redactor behind the `Detector`
+   boundary. Public claims (README, landing page) corrected to this number.
 
 8. ✅ **Cohort blending (k-anonymity) shipped** (2026-06-08) — the last big
    feature gap. Engine `/v1/cohort` (Rust `StaticPoolSynthesizer` +

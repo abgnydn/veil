@@ -137,11 +137,14 @@
 
   <section>
     <h2>Honest about its edges</h2>
-    <div class="honest"><b>veil is a strong privacy layer, not a magic guarantee.</b> The name detector catches
-    ~92% of people/places/orgs (recall is what matters — a miss is a leak), and over-flags sometimes.
-    k-anonymity defeats the "which one is real?" attacks; hiding a prompt's full <i>topic</i> is still a
-    work in progress. It shrinks what a third party sees dramatically, and keeps the truly sensitive
-    on your machine — and it's upfront about the rest.</div>
+    <div class="honest"><b>veil is a privacy layer, not a guarantee — and the numbers are public.</b>
+    On <a href="https://huggingface.co/datasets/Columbia-NLP/PUPA" style="color:#e7c98c;text-decoration:underline">PUPA</a>,
+    the benchmark from the <a href="https://arxiv.org/abs/2410.17127" style="color:#e7c98c;text-decoration:underline">PAPILLON</a>
+    paper, veil leaks <b>33.5%</b> of PII units vs PAPILLON's ~7.5% — its fixed-kind detector loses to
+    local-LLM rewriting on messy real-world PII. What veil has that the paper doesn't is <b>exact
+    reversibility</b> (its redaction round-trips perfectly) and that it's auditable shipped code, not a
+    research artifact. It keeps the truly sensitive on your machine, shrinks what the cloud sees — and
+    tells you exactly where it falls short.</div>
   </section>
 
   <footer>

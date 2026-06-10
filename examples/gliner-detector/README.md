@@ -44,7 +44,30 @@ python3 server.py            # downloads knowledgator/gliner-pii-base-v1.0 (~1GB
 Env: `VEIL_DETECTOR_BIND` (default `127.0.0.1:8808`), `GLINER_MODEL`,
 `GLINER_THRESHOLD`, `GLINER_STUB=1`.
 
-## Accuracy
+## Head-to-head vs the state of the art (PUPA)
+
+`pupa.py` runs veil on **[PUPA](https://huggingface.co/datasets/Columbia-NLP/PUPA)**
+— the 901-prompt benchmark from [PAPILLON](https://arxiv.org/abs/2410.17127),
+the published "use a local model as a privacy proxy" system — using its own
+leakage metric (fraction of annotated PII units that reach the remote model).
+
+| system | leakage ↓ | notes |
+|---|---|---|
+| **PAPILLON** (paper) | **~7.5%** | local LLM rewrites the whole prompt — redacts *arbitrary* PII |
+| **veil** (GLiNER + regex) | **33.5%** | fixed entity kinds only — leaks types it has no detector for |
+
+veil catches **66.5%** of annotated PII units and fully sanitizes 68.6% of
+prompts. **It loses to PAPILLON by ~4.5×, and that's the honest picture:** veil's
+fixed-kind detection (person/location/org + email/url/ip) can't touch the phone
+numbers, IDs, dates, and addresses PUPA also annotates, whereas PAPILLON's
+local-LLM rewrite redacts anything in context. The trade veil makes for that gap
+is **exact reversibility** — PAPILLON's redaction is lossy/one-way; veil's
+`EMAIL_1 ↔ alice@acme.com` round-trips perfectly. Closing the gap means putting a
+local-LLM redactor behind veil's `Detector` boundary (it's designed to swap).
+
+> Run it: `./.venv/bin/python pupa.py` (needs `datasets`; streams PUPA).
+
+## Accuracy (per-kind, ai4privacy)
 
 `eval.py` runs the real model over a small hand-labeled EN+TR set (person/
 location/org, with ambiguous cases and PII-free negatives) and reports per-kind
